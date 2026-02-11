@@ -2,9 +2,10 @@ name: Android Debug Build
 
 on:
   push:
-    branches: [ "main" ]
-  pull_request:
-  workflow_dispatch:
+    branches:
+      - main
+  pull_request: {}
+  workflow_dispatch: {}
 
 jobs:
   build:
@@ -22,14 +23,8 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
 
-      - name: Guard: no Theme.Material3 in app/src
-        shell: bash
-        run: |
-          if grep -R "Theme\.Material3" -n app/src --exclude-dir=build ; then
-            echo "Found forbidden Theme.Material3 reference"
-            exit 1
-          fi
-          echo "OK: no Theme.Material3 under app/src"
+      - name: Guard no Theme.Material3
+        run: bash -lc 'if grep -R "Theme\.Material3" -n app/src --exclude-dir=build ; then echo "Found forbidden Theme.Material3 reference"; exit 1; else echo "OK: no Theme.Material3 under app/src"; fi'
 
       - name: Build Debug APK
         run: gradle :app:assembleDebug
