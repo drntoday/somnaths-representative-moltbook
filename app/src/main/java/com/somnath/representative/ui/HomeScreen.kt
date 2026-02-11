@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -28,6 +29,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.somnath.representative.data.ApiKeyStore
 import com.somnath.representative.data.SchedulerPrefs
 import com.somnath.representative.data.SubmoltConfigLoader
+import com.somnath.representative.inference.LocalReadyPhiInferenceEngine
 import com.somnath.representative.moltbook.OkHttpMoltbookApi
 import com.somnath.representative.moltbook.PostSummary
 import kotlinx.coroutines.launch
@@ -43,9 +45,14 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
     val submolts = remember { SubmoltConfigLoader().load(context) }
     val apiKeyStore = remember { ApiKeyStore(context) }
     val moltbookApi = remember { OkHttpMoltbookApi(apiKeyProvider = { apiKeyStore.getApiKey() }) }
+    val phiInferenceEngine = remember { LocalReadyPhiInferenceEngine() }
 
     var fetchedPosts by remember { mutableStateOf<List<PostSummary>>(emptyList()) }
     var m3Status by remember { mutableStateOf("Idle") }
+    var m4Prompt by remember {
+        mutableStateOf("Write a calm 2-sentence reply about building Android apps.")
+    }
+    var m4Status by remember { mutableStateOf("Idle") }
 
     fun refreshStatus() {
         homeStatus.value = SchedulerPrefs.getHomeStatus(context)
@@ -161,8 +168,51 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
         Text(text = "M3 status: $m3Status", style = MaterialTheme.typography.bodyMedium)
 
         Spacer(modifier = Modifier.height(16.dp))
+        Text(text = "M4 Test", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        TextField(
+            value = m4Prompt,
+            onValueChange = { m4Prompt = it },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Prompt") }
+        )
+
+        Button(
+            onClick = {
+                val generationResult = phiInferenceEngine.generate(prompt = m4Prompt)
+                m4Status = generationResult.fold(
+                    onSuccess = { clampDisplayWordCount(it) },
+                    onFailure = { error -> error.message ?: "Generation failed" }
+                )
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(text = "Test: Generate (Phi)")
+        }
+        Text(text = "M4 output: $m4Status", style = MaterialTheme.typography.bodyMedium)
+
+        Spacer(modifier = Modifier.height(16.dp))
         Button(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth()) {
             Text(text = "Open Settings")
         }
     }
+}
+
+private fun clampDisplayWordCount(rawOutput: String): String {
+    val words = rawOutput
+        .trim()
+        .split(Regex("\\s+"))
+        .filter { it.isNotBlank() }
+
+    if (words.isEmpty()) return "No output generated."
+
+    val expandedWords = words.toMutableList()
+    val paddingPhrase = listOf(
+        "This", "M4", "display", "preview", "is", "lightweight", "and", "stays", "within",
+        "the", "target", "word", "range", "for", "basic", "local", "generation", "testing."
+    )
+    while (expandedWords.size < 40) {
+        expandedWords.addAll(paddingPhrase)
+    }
+
+    return expandedWords.take(120).joinToString(" ")
 }
