@@ -1,0 +1,33 @@
+name: Android Build
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Guard against Material3 theme usage
+        run: |
+          if matches=$(grep -R "Theme.Material3" -n app/src --exclude-dir=build --exclude-dir=.gradle); then
+            echo "Found forbidden Theme.Material3 references:"
+            echo "$matches"
+            exit 1
+          else
+            echo "No Theme.Material3 references found in app/src."
+          fi
+
+      - name: Build
+        run: ./gradlew assembleDebug
