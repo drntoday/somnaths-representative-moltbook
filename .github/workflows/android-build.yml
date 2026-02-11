@@ -1,0 +1,28 @@
+name: Android Build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Guard against Material3 XML theme references
+        run: |
+          if grep -R "Theme.Material3" -n . ; then
+            echo "Found forbidden Theme.Material3 reference"; exit 1;
+          fi
+
+      - name: Build debug APK
+        run: ./gradlew assembleDebug
