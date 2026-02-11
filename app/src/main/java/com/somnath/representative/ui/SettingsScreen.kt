@@ -9,14 +9,26 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.somnath.representative.data.SchedulerPrefs
+import com.somnath.representative.scheduler.SomnathRepScheduler
 
 @Composable
 fun SettingsScreen(onBack: () -> Unit) {
+    val context = LocalContext.current
+    var chargingOnly by remember { mutableStateOf(SchedulerPrefs.isChargingOnly(context)) }
+    var wifiOnly by remember { mutableStateOf(SchedulerPrefs.isWifiOnly(context)) }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -29,18 +41,41 @@ fun SettingsScreen(onBack: () -> Unit) {
             fontWeight = FontWeight.Bold
         )
         Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = "Scheduler settings will appear here",
-            style = MaterialTheme.typography.bodyLarge
+
+        Text(text = "Run only when charging", style = MaterialTheme.typography.bodyLarge)
+        Switch(
+            checked = chargingOnly,
+            onCheckedChange = { chargingOnly = it }
         )
-        Text(
-            text = "Moltbook API key setup will appear here",
-            style = MaterialTheme.typography.bodyLarge
+
+        Text(text = "Run only on Wi-Fi", style = MaterialTheme.typography.bodyLarge)
+        Switch(
+            checked = wifiOnly,
+            onCheckedChange = { wifiOnly = it }
         )
-        Text(
-            text = "RSS/Search sources will appear here",
-            style = MaterialTheme.typography.bodyLarge
-        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+        Button(
+            onClick = {
+                SchedulerPrefs.setSchedulerSettings(context, chargingOnly, wifiOnly)
+                SchedulerPrefs.setSchedulerEnabled(context, true)
+                SomnathRepScheduler.schedule(context, chargingOnly, wifiOnly)
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(text = "Apply Scheduler Settings")
+        }
+
+        Button(
+            onClick = {
+                SomnathRepScheduler.cancel(context)
+                SchedulerPrefs.setSchedulerEnabled(context, false)
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(text = "Disable Scheduler")
+        }
+
         Spacer(modifier = Modifier.height(16.dp))
         Button(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
             Text(text = "Back")
