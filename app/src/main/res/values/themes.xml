@@ -1,6 +1,3 @@
 <resources>
-    <style name="Theme.SomnathsRepresentative" parent="Theme.AppCompat.DayNight.NoActionBar">
-        <item name="android:statusBarColor">@android:color/transparent</item>
-        <item name="android:navigationBarColor">@android:color/transparent</item>
-    </style>
+    <style name="Theme.SomnathRepresentative" parent="Theme.AppCompat.DayNight.NoActionBar" />
 </resources>
