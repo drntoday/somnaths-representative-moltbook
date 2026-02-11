@@ -32,6 +32,11 @@ import com.somnath.representative.data.ApiKeyStore
 import com.somnath.representative.data.RssFeedConfigLoader
 import com.somnath.representative.data.SchedulerPrefs
 import com.somnath.representative.data.SubmoltConfigLoader
+import com.somnath.representative.duplicate.GateStatus
+import com.somnath.representative.duplicate.LocalTinyCacheGate
+import com.somnath.representative.duplicate.StubSelfHistoryGate
+import com.somnath.representative.duplicate.StubThreadDuplicationGate
+import com.somnath.representative.duplicate.TinyFingerprintCacheStore
 import com.somnath.representative.factpack.FactPack
 import com.somnath.representative.factpack.FactPackBuilder
 import com.somnath.representative.inference.LocalReadyPhiInferenceEngine
@@ -61,6 +66,10 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
     val apiKeyStore = remember { ApiKeyStore(context) }
     val moltbookApi = remember { OkHttpMoltbookApi(apiKeyProvider = { apiKeyStore.getApiKey() }) }
     val phiInferenceEngine = remember { LocalReadyPhiInferenceEngine() }
+    val tinyCacheStore = remember { TinyFingerprintCacheStore(context) }
+    val tinyCacheGate = remember { LocalTinyCacheGate(tinyCacheStore, phiInferenceEngine) }
+    val selfHistoryGate = remember { StubSelfHistoryGate() }
+    val threadDuplicationGate = remember { StubThreadDuplicationGate() }
     val rssFetcher = remember { RssFetcher() }
     val searchVerifier = remember { StubSearchVerifier() }
     val factPackBuilder = remember { FactPackBuilder() }
@@ -75,6 +84,7 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
     var m5Topic by remember { mutableStateOf("Latest Android AI release") }
     var m5Status by remember { mutableStateOf("Idle") }
     var m5FactPack by remember { mutableStateOf<FactPack?>(null) }
+    var tinyCacheCount by remember { mutableStateOf(tinyCacheStore.getRecentFingerprints().size) }
 
     fun refreshStatus() {
         homeStatus.value = SchedulerPrefs.getHomeStatus(context)
@@ -136,6 +146,17 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
             style = MaterialTheme.typography.bodyLarge
         )
         Text(text = "Errors: ${homeStatus.value.errorsCount}", style = MaterialTheme.typography.bodyLarge)
+        Text(text = "Tiny cache entries: $tinyCacheCount/20", style = MaterialTheme.typography.bodyLarge)
+        Button(
+            onClick = {
+                tinyCacheStore.clear()
+                tinyCacheCount = tinyCacheStore.getRecentFingerprints().size
+                m3Status = "Tiny cache cleared"
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(text = "Clear Tiny Cache")
+        }
 
         Spacer(modifier = Modifier.height(16.dp))
         Text(text = "M3 Test", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
@@ -172,12 +193,60 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
                     }
 
                     val targetPostId = fetchedPosts.first().id
-                    val result = moltbookApi.postComment(
-                        postId = targetPostId,
-                        body = "Test comment from Somnath’s Representative (M3)"
-                    )
+                    val originalDraft = "Test comment from Somnath’s Representative (M3)"
+                    val localGate = tinyCacheGate.evaluateCommentDraft(originalDraft)
+                    if (localGate.decision.status == GateStatus.SKIP) {
+                        m3Status = "Skipped due to duplicate"
+                        return@launch
+                    }
+
+                    val statusParts = mutableListOf(localGate.decision.message)
+
+                    val selfHistoryDecision = selfHistoryGate.check(localGate.finalDraftText).getOrElse {
+                        statusParts.add(it.message ?: "Self-history gate failed; allowing by default")
+                        com.somnath.representative.duplicate.GateDecision(
+                            status = GateStatus.UNKNOWN,
+                            message = "Self-history gate failed; allowing by default"
+                        )
+                    }
+                    if (selfHistoryDecision.status == GateStatus.SKIP) {
+                        m3Status = "Skipped due to duplicate"
+                        return@launch
+                    }
+                    if (selfHistoryDecision.status == GateStatus.UNKNOWN) {
+                        statusParts.add(selfHistoryDecision.message)
+                    }
+
+                    val threadDecision = threadDuplicationGate.check(
+                        localGate.finalDraftText,
+                        threadComments = emptyList()
+                    ).getOrElse {
+                        statusParts.add(it.message ?: "Thread-duplication gate failed; allowing by default")
+                        com.somnath.representative.duplicate.GateDecision(
+                            status = GateStatus.UNKNOWN,
+                            message = "Thread-duplication gate failed; allowing by default"
+                        )
+                    }
+                    if (threadDecision.status == GateStatus.SKIP) {
+                        m3Status = "Skipped due to duplicate"
+                        return@launch
+                    }
+                    if (threadDecision.status == GateStatus.UNKNOWN) {
+                        statusParts.add(threadDecision.message)
+                    }
+
+                    val result = moltbookApi.postComment(postId = targetPostId, body = localGate.finalDraftText)
                     m3Status = result.fold(
-                        onSuccess = { "Post comment succeeded on post: $targetPostId" },
+                        onSuccess = {
+                            tinyCacheGate.registerPostedFingerprint(localGate.finalFingerprint, type = "comment")
+                            tinyCacheCount = tinyCacheStore.getRecentFingerprints().size
+                            val gateSuffix = if (statusParts.isNotEmpty()) {
+                                " (${statusParts.joinToString(" | ")})"
+                            } else {
+                                ""
+                            }
+                            "Post comment succeeded on post: $targetPostId$gateSuffix"
+                        },
                         onFailure = { it.message ?: "Post comment failed" }
                     )
                 }
