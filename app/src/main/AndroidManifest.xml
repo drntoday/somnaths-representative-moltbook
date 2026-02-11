@@ -7,7 +7,7 @@
         android:label="Somnath's Representative"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.SomnathRepresentative">
+        android:theme="@android:style/Theme.DeviceDefault">
         <activity
             android:name=".MainActivity"
             android:exported="true">
