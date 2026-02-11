@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -27,12 +29,23 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.somnath.representative.data.ApiKeyStore
+import com.somnath.representative.data.RssFeedConfigLoader
 import com.somnath.representative.data.SchedulerPrefs
 import com.somnath.representative.data.SubmoltConfigLoader
+import com.somnath.representative.factpack.FactPack
+import com.somnath.representative.factpack.FactPackBuilder
 import com.somnath.representative.inference.LocalReadyPhiInferenceEngine
 import com.somnath.representative.moltbook.OkHttpMoltbookApi
 import com.somnath.representative.moltbook.PostSummary
+import com.somnath.representative.rss.RssFetcher
+import com.somnath.representative.rss.RssItem
+import com.somnath.representative.search.SearchProviderConfigLoader
+import com.somnath.representative.search.StubSearchVerifier
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Date
 
 @Composable
@@ -43,9 +56,14 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
 
     val homeStatus = remember { mutableStateOf(SchedulerPrefs.getHomeStatus(context)) }
     val submolts = remember { SubmoltConfigLoader().load(context) }
+    val rssFeedLoader = remember { RssFeedConfigLoader() }
+    val searchProviderConfigLoader = remember { SearchProviderConfigLoader() }
     val apiKeyStore = remember { ApiKeyStore(context) }
     val moltbookApi = remember { OkHttpMoltbookApi(apiKeyProvider = { apiKeyStore.getApiKey() }) }
     val phiInferenceEngine = remember { LocalReadyPhiInferenceEngine() }
+    val rssFetcher = remember { RssFetcher() }
+    val searchVerifier = remember { StubSearchVerifier() }
+    val factPackBuilder = remember { FactPackBuilder() }
 
     var fetchedPosts by remember { mutableStateOf<List<PostSummary>>(emptyList()) }
     var m3Status by remember { mutableStateOf("Idle") }
@@ -53,6 +71,10 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
         mutableStateOf("Write a calm 2-sentence reply about building Android apps.")
     }
     var m4Status by remember { mutableStateOf("Idle") }
+
+    var m5Topic by remember { mutableStateOf("Latest Android AI release") }
+    var m5Status by remember { mutableStateOf("Idle") }
+    var m5FactPack by remember { mutableStateOf<FactPack?>(null) }
 
     fun refreshStatus() {
         homeStatus.value = SchedulerPrefs.getHomeStatus(context)
@@ -85,6 +107,7 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
@@ -191,9 +214,117 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
         Text(text = "M4 output: $m4Status", style = MaterialTheme.typography.bodyMedium)
 
         Spacer(modifier = Modifier.height(16.dp))
+        Text(text = "M5 Test", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+
+        TextField(
+            value = m5Topic,
+            onValueChange = { m5Topic = it },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Topic / Query") }
+        )
+
+        Button(
+            onClick = {
+                coroutineScope.launch {
+                    m5Status = "Loading RSS feeds..."
+                    m5FactPack = null
+
+                    val feeds = rssFeedLoader.load(context)
+                    if (feeds.isEmpty()) {
+                        m5Status = "No RSS feeds configured in rss_feeds.json"
+                    }
+
+                    val rssResult = withContext(Dispatchers.IO) {
+                        fetchRssSignals(rssFetcher, feeds, maxFeeds = 2, itemLimit = 3)
+                    }
+
+                    val searchProvider = searchProviderConfigLoader.load(context)
+                    val searchResult = searchVerifier.search(m5Topic, limit = 5)
+                    val searchItems = searchResult.getOrElse { emptyList() }
+
+                    val factPack = factPackBuilder.build(
+                        topic = m5Topic,
+                        rssItems = rssResult.items,
+                        searchResults = searchItems
+                    )
+                    m5FactPack = factPack
+
+                    val statusParts = mutableListOf<String>()
+                    statusParts.add("RSS items: ${rssResult.items.size}")
+                    if (rssResult.errors.isNotEmpty()) {
+                        statusParts.add("RSS errors: ${rssResult.errors.joinToString(" | ")}")
+                    }
+                    statusParts.add(
+                        searchResult.fold(
+                            onSuccess = { "Search results: ${it.size}" },
+                            onFailure = {
+                                "Search: ${it.message ?: "not configured"} (provider=${searchProvider.provider})"
+                            }
+                        )
+                    )
+                    m5Status = statusParts.joinToString(" • ")
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(text = "Test: Build Fact Pack")
+        }
+
+        Text(text = "M5 status: $m5Status", style = MaterialTheme.typography.bodyMedium)
+        m5FactPack?.let { factPack ->
+            Text(
+                text = "Confidence: ${factPack.confidence}",
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium
+            )
+            Text(text = "As-of: ${factPack.asOf}", style = MaterialTheme.typography.bodyLarge)
+            factPack.bullets.forEachIndexed { index, bullet ->
+                Text(text = "${index + 1}. $bullet", style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
         Button(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth()) {
             Text(text = "Open Settings")
         }
+    }
+}
+
+data class RssFetchSummary(
+    val items: List<RssItem>,
+    val errors: List<String>
+)
+
+private suspend fun fetchRssSignals(
+    rssFetcher: RssFetcher,
+    feeds: List<String>,
+    maxFeeds: Int,
+    itemLimit: Int
+): RssFetchSummary {
+    if (feeds.isEmpty()) {
+        return RssFetchSummary(items = emptyList(), errors = emptyList())
+    }
+
+    return withContext(Dispatchers.IO) {
+        val jobs = feeds.take(maxFeeds).map { feedUrl ->
+            async {
+                feedUrl to rssFetcher.fetch(feedUrl, limit = itemLimit)
+            }
+        }
+
+        val results = jobs.awaitAll()
+        val items = mutableListOf<RssItem>()
+        val errors = mutableListOf<String>()
+
+        results.forEach { (feedUrl, result) ->
+            result.onSuccess {
+                items.addAll(it)
+            }.onFailure {
+                errors.add("$feedUrl -> ${it.message ?: "RSS fetch failed"}")
+            }
+        }
+
+        RssFetchSummary(items = items.take(itemLimit * maxFeeds), errors = errors)
     }
 }
 
