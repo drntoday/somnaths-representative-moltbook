@@ -1,33 +1,40 @@
-name: Android Build
+name: Android Debug Build
 
 on:
   push:
-    branches: [ main, work ]
+    branches:
+      - main
   pull_request:
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v3
 
-      - name: Guard: no Theme.Material3 in app/src
+      - name: "Guard: no Theme.Material3 in app/src"
         run: |
+          echo "Checking for forbidden Theme.Material3 references in app/src..."
           if grep -R "Theme\.Material3" -n app/src --exclude-dir=build ; then
-            echo "Found forbidden Theme.Material3 reference"; exit 1;
+            echo "Found Theme.Material3 reference. Failing build."
+            exit 1
           else
-            echo "OK: no Theme.Material3 under app/src";
+            echo "No Theme.Material3 reference found."
+            exit 0
           fi
 
-      - name: Build debug APK
-        run: gradle :app:assembleDebug
+      - run: gradle :app:assembleDebug
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
