@@ -24,6 +24,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v3
 
       - name: Guard no Theme.Material3
+        run: 'bash -lc ''if grep -R "Theme\.Material3" -n app/src --exclude-dir=build ; then echo "Found forbidden Theme.Material3 reference"; exit 1; else echo "OK: no Theme.Material3 under app/src"; fi'''
         run: bash -lc 'if grep -R "Theme\.Material3" -n app/src --exclude-dir=build ; then echo "Found forbidden Theme.Material3 reference"; exit 1; else echo "OK: no Theme.Material3 under app/src"; fi'
 
       - name: Build Debug APK
