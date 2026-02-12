@@ -43,7 +43,9 @@ android {
             minifyEnabled true
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-            signingConfig signingConfigs.release
+            if (releaseSigningMissing.isEmpty()) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 
@@ -62,19 +64,6 @@ android {
     }
 }
 
-def isReleaseTaskRequested = gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') }
-if (isReleaseTaskRequested) {
-    def missingReleaseSigningEnv = [
-            'SIGNING_STORE_FILE',
-            'SIGNING_STORE_PASSWORD',
-            'SIGNING_KEY_ALIAS',
-            'SIGNING_KEY_PASSWORD'
-    ].findAll { !System.getenv(it)?.trim() }
-
-    if (!missingReleaseSigningEnv.isEmpty()) {
-        throw new GradleException("Release signing is not configured. Missing environment variables: ${missingReleaseSigningEnv.join(', ')}")
-    }
-}
 
 configurations.all {
     resolutionStrategy.force(
