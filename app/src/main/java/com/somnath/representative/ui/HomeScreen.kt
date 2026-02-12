@@ -32,6 +32,7 @@ import androidx.work.Constraints
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
+import com.somnath.representative.BuildConfig
 import com.somnath.representative.data.ApiKeyStore
 import com.somnath.representative.data.RssFeedConfigLoader
 import com.somnath.representative.data.SchedulerPrefs
@@ -124,7 +125,7 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
     }
 
     val hasSubmolts = submolts.isNotEmpty()
-    val debugToolsEnabled = SchedulerPrefs.isDebugToolsEnabled(context)
+    val debugToolsEnabled = BuildConfig.DEBUG && SchedulerPrefs.isDebugToolsEnabled(context)
 
     Column(
         modifier = Modifier

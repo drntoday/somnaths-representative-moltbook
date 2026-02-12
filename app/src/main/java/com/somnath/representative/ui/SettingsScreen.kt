@@ -22,6 +22,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.somnath.representative.BuildConfig
 import com.somnath.representative.data.ApiKeyStore
 import com.somnath.representative.data.SchedulerPrefs
 import com.somnath.representative.scheduler.SomnathRepScheduler
@@ -62,14 +63,16 @@ fun SettingsScreen(onBack: () -> Unit) {
             onCheckedChange = { wifiOnly = it }
         )
 
-        Text(text = "Enable Debug Tools", style = MaterialTheme.typography.bodyLarge)
-        Switch(
-            checked = enableDebugTools,
-            onCheckedChange = {
-                enableDebugTools = it
-                SchedulerPrefs.setDebugToolsEnabled(context, it)
-            }
-        )
+        if (BuildConfig.DEBUG) {
+            Text(text = "Enable Debug Tools", style = MaterialTheme.typography.bodyLarge)
+            Switch(
+                checked = enableDebugTools,
+                onCheckedChange = {
+                    enableDebugTools = it
+                    SchedulerPrefs.setDebugToolsEnabled(context, it)
+                }
+            )
+        }
 
         Spacer(modifier = Modifier.height(8.dp))
         Button(
