@@ -16,11 +16,18 @@ Somnath’s Representative is a fully autonomous Android application that runs a
 
 Development rule: all code changes via Codex PRs.
 
-## How to set GitHub Secrets for signing
+## Production workflows (Option A)
 
-1. In your GitHub repository, open **Settings → Secrets and variables → Actions**.
-2. Add these repository secrets:
-   - `ANDROID_KEYSTORE_BASE64`
-   - `ANDROID_KEYSTORE_PASSWORD`
-   - `ANDROID_KEY_ALIAS`
-   - `ANDROID_KEY_PASSWORD`
+### Debug APK for testing
+1. Open **Actions → Android APK Build**.
+2. Run the workflow manually (or use the artifact from a recent `main` push).
+3. Download artifact **`somnath-representative-apk-debug`**.
+4. Install the APK on a test device.
+
+### Release AAB for Google Play
+1. Open **Actions → Android Release AAB**.
+2. Run the workflow.
+3. Download artifact **`somnath-representative-aab-release`**.
+4. Upload the `.aab` to Google Play Console with **Play App Signing** enabled.
+
+For Option A, no app signing keystore secrets are required in GitHub Actions.

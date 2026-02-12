@@ -29,5 +29,5 @@ jobs:
       - name: Upload release AAB artifact
         uses: actions/upload-artifact@v4
         with:
-          name: somnath-representative-aab
+          name: somnath-representative-aab-release
           path: app/build/outputs/bundle/release/*.aab
