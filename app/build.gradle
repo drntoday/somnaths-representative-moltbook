@@ -16,37 +16,12 @@ android {
         versionName '1.0'
     }
 
-    def signingStoreFile = System.getenv('SIGNING_STORE_FILE')
-    def signingStorePassword = System.getenv('SIGNING_STORE_PASSWORD')
-    def signingKeyAlias = System.getenv('SIGNING_KEY_ALIAS')
-    def signingKeyPassword = System.getenv('SIGNING_KEY_PASSWORD')
-    def releaseSigningMissing = [
-            'SIGNING_STORE_FILE': signingStoreFile,
-            'SIGNING_STORE_PASSWORD': signingStorePassword,
-            'SIGNING_KEY_ALIAS': signingKeyAlias,
-            'SIGNING_KEY_PASSWORD': signingKeyPassword
-    ].findAll { key, value -> value == null || value.trim().isEmpty() }.keySet()
-
-    signingConfigs {
-        release {
-            if (releaseSigningMissing.isEmpty()) {
-                storeFile file(signingStoreFile)
-                storePassword signingStorePassword
-                keyAlias signingKeyAlias
-                keyPassword signingKeyPassword
-            }
-        }
-    }
-
     buildTypes {
         release {
             debuggable false
             minifyEnabled true
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-            if (releaseSigningMissing.isEmpty()) {
-                signingConfig signingConfigs.release
-            }
         }
     }
 
