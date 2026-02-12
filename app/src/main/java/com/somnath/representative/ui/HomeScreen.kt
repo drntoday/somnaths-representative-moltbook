@@ -34,6 +34,7 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import com.somnath.representative.BuildConfig
 import com.somnath.representative.data.ApiKeyStore
+import com.somnath.representative.data.LocalModelPrefs
 import com.somnath.representative.data.RssFeedConfigLoader
 import com.somnath.representative.data.SchedulerPrefs
 import com.somnath.representative.data.SubmoltConfigLoader
@@ -72,7 +73,7 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
     val searchProviderConfigLoader = remember { SearchProviderConfigLoader() }
     val apiKeyStore = remember { ApiKeyStore(context) }
     val moltbookApi = remember { OkHttpMoltbookApi(apiKeyProvider = { apiKeyStore.getApiKey() }) }
-    val phiInferenceEngine = remember { LocalReadyPhiInferenceEngine() }
+    val phiInferenceEngine = remember { LocalReadyPhiInferenceEngine(context) }
     val tinyCacheStore = remember { TinyFingerprintCacheStore(context) }
     val tinyCacheGate = remember { LocalTinyCacheGate(tinyCacheStore, phiInferenceEngine) }
     val selfHistoryGate = remember { StubSelfHistoryGate() }
@@ -360,24 +361,37 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
 
         Button(
             onClick = {
-                val generationResult = phiInferenceEngine.generate(prompt = m4Prompt)
-                m4Status = generationResult.fold(
-                    onSuccess = {
-                        val safetyResult = safetyGuard.evaluate(
-                            threadText = m4Prompt,
-                            draftText = clampDisplayWordCount(it),
-                            factPack = m5FactPack
-                        )
-                        m4Confidence = safetyResult.confidence
-                        m4Decision = "${safetyResult.decision} (${safetyResult.reason})"
-                        if (safetyResult.decision == SafetyDecision.SKIP) {
-                            "SKIP: ${safetyResult.reason}"
-                        } else {
-                            safetyResult.finalText
-                        }
-                    },
-                    onFailure = { error -> error.message ?: "Generation failed" }
-                )
+                coroutineScope.launch {
+                    val modelUri = LocalModelPrefs.getModelUri(context)
+                    if (modelUri.isNullOrBlank()) {
+                        m4Status = "Select a GGUF model in Settings first."
+                        m4Confidence = null
+                        m4Decision = null
+                        return@launch
+                    }
+
+                    m4Status = "Generating..."
+                    val generationResult = withContext(Dispatchers.IO) {
+                        phiInferenceEngine.generate(prompt = m4Prompt)
+                    }
+                    m4Status = generationResult.fold(
+                        onSuccess = {
+                            val safetyResult = safetyGuard.evaluate(
+                                threadText = m4Prompt,
+                                draftText = clampDisplayWordCount(it),
+                                factPack = m5FactPack
+                            )
+                            m4Confidence = safetyResult.confidence
+                            m4Decision = "${safetyResult.decision} (${safetyResult.reason})"
+                            if (safetyResult.decision == SafetyDecision.SKIP) {
+                                "SKIP: ${safetyResult.reason}"
+                            } else {
+                                clampDisplayWordCount(safetyResult.finalText)
+                            }
+                        },
+                        onFailure = { error -> error.message ?: "Generation failed" }
+                    )
+                }
             },
             modifier = Modifier.fillMaxWidth()
         ) {
@@ -514,14 +528,5 @@ private fun clampDisplayWordCount(rawOutput: String): String {
 
     if (words.isEmpty()) return "No output generated."
 
-    val expandedWords = words.toMutableList()
-    val paddingPhrase = listOf(
-        "This", "M4", "display", "preview", "is", "lightweight", "and", "stays", "within",
-        "the", "target", "word", "range", "for", "basic", "local", "generation", "testing."
-    )
-    while (expandedWords.size < 40) {
-        expandedWords.addAll(paddingPhrase)
-    }
-
-    return expandedWords.take(120).joinToString(" ")
+    return words.take(120).joinToString(" ")
 }

@@ -1,5 +1,9 @@
 package com.somnath.representative.ui
 
+import android.content.Intent
+import android.provider.OpenableColumns
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -25,6 +29,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.somnath.representative.BuildConfig
 import com.somnath.representative.data.ApiKeyStore
+import com.somnath.representative.data.LocalModelPrefs
 import com.somnath.representative.data.SchedulerPrefs
 import com.somnath.representative.scheduler.SomnathRepScheduler
 
@@ -45,6 +50,33 @@ fun SettingsScreen(onBack: () -> Unit) {
     }
     var apiKeyInput by remember { mutableStateOf("") }
     var apiKeyStatus by remember { mutableStateOf("") }
+    var selectedModelUri by remember { mutableStateOf(LocalModelPrefs.getModelUri(context)) }
+    var selectedModelName by remember { mutableStateOf(selectedModelUri?.let { getDisplayName(context, it) } ?: "None selected") }
+
+    val modelPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+        onResult = { uri ->
+            if (uri == null) {
+                return@rememberLauncherForActivityResult
+            }
+
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+                val displayName = getDisplayName(context, uri.toString())
+                if (!displayName.lowercase().endsWith(".gguf")) {
+                    throw IllegalArgumentException("Please select a .gguf file")
+                }
+                LocalModelPrefs.setModelUri(context, uri.toString())
+                selectedModelUri = uri.toString()
+                selectedModelName = displayName
+            }.onFailure {
+                selectedModelName = "Failed to store selected model"
+            }
+        }
+    )
 
     Column(
         modifier = Modifier
@@ -144,8 +176,53 @@ fun SettingsScreen(onBack: () -> Unit) {
         }
 
         Spacer(modifier = Modifier.height(16.dp))
+        Text(text = "Local Model (GGUF)", style = MaterialTheme.typography.titleMedium)
+        Text(
+            text = "Download a Phi GGUF model to your phone, then select it here. The app runs offline.",
+            style = MaterialTheme.typography.bodySmall
+        )
+        Text(text = "Selected: $selectedModelName", style = MaterialTheme.typography.bodyMedium)
+
+        Button(
+            onClick = { modelPickerLauncher.launch(arrayOf("*/*")) },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(text = "Select GGUF Model File")
+        }
+
+        Button(
+            onClick = {
+                selectedModelUri?.let { uriString ->
+                    runCatching {
+                        context.contentResolver.releasePersistableUriPermission(
+                            android.net.Uri.parse(uriString),
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION
+                        )
+                    }
+                }
+                LocalModelPrefs.clearModelUri(context)
+                selectedModelUri = null
+                selectedModelName = "None selected"
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(text = "Clear Model")
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
         Button(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
             Text(text = "Back")
         }
     }
+}
+
+private fun getDisplayName(context: android.content.Context, uriString: String): String {
+    val uri = android.net.Uri.parse(uriString)
+    context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+        val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+        if (idx >= 0 && cursor.moveToFirst()) {
+            return cursor.getString(idx) ?: "Selected model"
+        }
+    }
+    return uri.lastPathSegment ?: "Selected model"
 }
