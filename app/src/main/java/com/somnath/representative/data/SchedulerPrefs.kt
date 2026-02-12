@@ -14,6 +14,7 @@ object SchedulerPrefs {
     private const val KEY_ACTIONS_TODAY_COUNT = "actionsTodayCount"
     private const val KEY_ACTIONS_TODAY_DATE = "actionsTodayDate"
     private const val KEY_SCHEDULER_ENABLED = "schedulerEnabled"
+    private const val KEY_ENABLE_DEBUG_TOOLS = "enable_debug_tools"
 
     data class HomeStatus(
         val schedulerEnabled: Boolean,
@@ -41,6 +42,13 @@ object SchedulerPrefs {
 
     fun setSchedulerEnabled(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_SCHEDULER_ENABLED, enabled).apply()
+    }
+
+    fun isDebugToolsEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_ENABLE_DEBUG_TOOLS, false)
+
+    fun setDebugToolsEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_ENABLE_DEBUG_TOOLS, enabled).apply()
     }
 
     fun incrementErrors(context: Context) {

@@ -33,6 +33,7 @@ fun SettingsScreen(onBack: () -> Unit) {
 
     var chargingOnly by remember { mutableStateOf(SchedulerPrefs.isChargingOnly(context)) }
     var wifiOnly by remember { mutableStateOf(SchedulerPrefs.isWifiOnly(context)) }
+    var enableDebugTools by remember { mutableStateOf(SchedulerPrefs.isDebugToolsEnabled(context)) }
     var apiKeyInput by remember { mutableStateOf("") }
     var apiKeyStatus by remember { mutableStateOf("") }
 
@@ -59,6 +60,15 @@ fun SettingsScreen(onBack: () -> Unit) {
         Switch(
             checked = wifiOnly,
             onCheckedChange = { wifiOnly = it }
+        )
+
+        Text(text = "Enable Debug Tools", style = MaterialTheme.typography.bodyLarge)
+        Switch(
+            checked = enableDebugTools,
+            onCheckedChange = {
+                enableDebugTools = it
+                SchedulerPrefs.setDebugToolsEnabled(context, it)
+            }
         )
 
         Spacer(modifier = Modifier.height(8.dp))
