@@ -1,5 +1,9 @@
 package com.somnath.representative.ui
 
+import android.content.Intent
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -23,8 +27,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.documentfile.provider.DocumentFile
 import com.somnath.representative.BuildConfig
 import com.somnath.representative.data.ApiKeyStore
+import com.somnath.representative.data.ModelPrefs
 import com.somnath.representative.data.SchedulerPrefs
 import com.somnath.representative.scheduler.SomnathRepScheduler
 
@@ -32,6 +38,7 @@ import com.somnath.representative.scheduler.SomnathRepScheduler
 fun SettingsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val apiKeyStore = remember { ApiKeyStore(context) }
+    val modelPrefs = remember { ModelPrefs(context) }
 
     var chargingOnly by remember { mutableStateOf(SchedulerPrefs.isChargingOnly(context)) }
     var wifiOnly by remember { mutableStateOf(SchedulerPrefs.isWifiOnly(context)) }
@@ -45,6 +52,25 @@ fun SettingsScreen(onBack: () -> Unit) {
     }
     var apiKeyInput by remember { mutableStateOf("") }
     var apiKeyStatus by remember { mutableStateOf("") }
+    var modelUriString by remember { mutableStateOf(modelPrefs.getModelFolderUriString()) }
+    var modelStatus by remember { mutableStateOf("") }
+
+    val modelFolderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
+        if (uri == null) {
+            modelStatus = "Model folder selection canceled"
+            return@rememberLauncherForActivityResult
+        }
+
+        val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(uri, flags)
+            modelPrefs.saveModelFolderUri(uri)
+            modelUriString = uri.toString()
+            modelStatus = "Model folder selected"
+        }.onFailure {
+            modelStatus = "Could not persist model folder permission"
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -141,6 +167,44 @@ fun SettingsScreen(onBack: () -> Unit) {
 
         if (apiKeyStatus.isNotBlank()) {
             Text(text = apiKeyStatus, style = MaterialTheme.typography.bodyMedium)
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(text = "Phi Model Folder", style = MaterialTheme.typography.titleMedium)
+        val selectedFolderName = modelUriString?.let { uriString ->
+            DocumentFile.fromTreeUri(context, Uri.parse(uriString))?.name ?: uriString
+        } ?: "Not selected"
+        Text(text = "Selected: $selectedFolderName", style = MaterialTheme.typography.bodyMedium)
+
+        Button(
+            onClick = { modelFolderPicker.launch(null) },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(text = "Select Model Folder")
+        }
+
+        Button(
+            onClick = {
+                val existing = modelUriString
+                if (existing != null) {
+                    runCatching {
+                        context.contentResolver.releasePersistableUriPermission(
+                            Uri.parse(existing),
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                        )
+                    }
+                }
+                modelPrefs.clearModelFolder()
+                modelUriString = null
+                modelStatus = "Model folder cleared"
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(text = "Clear Model")
+        }
+
+        if (modelStatus.isNotBlank()) {
+            Text(text = modelStatus, style = MaterialTheme.typography.bodyMedium)
         }
 
         Spacer(modifier = Modifier.height(16.dp))
