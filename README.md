@@ -16,18 +16,9 @@ Somnath’s Representative is a fully autonomous Android application that runs a
 
 Development rule: all code changes via Codex PRs.
 
-## Production workflows (Option A)
+## Personal use install
 
-### Debug APK for testing
 1. Open **Actions → Android APK Build**.
 2. Run the workflow manually (or use the artifact from a recent `main` push).
 3. Download artifact **`somnath-representative-apk-debug`**.
-4. Install the APK on a test device.
-
-### Release AAB for Google Play
-1. Open **Actions → Android Release AAB**.
-2. Run the workflow.
-3. Download artifact **`somnath-representative-aab-release`**.
-4. Upload the `.aab` to Google Play Console with **Play App Signing** enabled.
-
-For Option A, no app signing keystore secrets are required in GitHub Actions.
+4. Install the APK on your Android device.
