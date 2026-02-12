@@ -13,6 +13,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,7 +35,14 @@ fun SettingsScreen(onBack: () -> Unit) {
 
     var chargingOnly by remember { mutableStateOf(SchedulerPrefs.isChargingOnly(context)) }
     var wifiOnly by remember { mutableStateOf(SchedulerPrefs.isWifiOnly(context)) }
-    var enableDebugTools by remember { mutableStateOf(SchedulerPrefs.isDebugToolsEnabled(context)) }
+    var enableDebugTools by remember { mutableStateOf(BuildConfig.DEBUG && SchedulerPrefs.isDebugToolsEnabled(context)) }
+
+    LaunchedEffect(Unit) {
+        if (!BuildConfig.DEBUG) {
+            SchedulerPrefs.setDebugToolsEnabled(context, false)
+            enableDebugTools = false
+        }
+    }
     var apiKeyInput by remember { mutableStateOf("") }
     var apiKeyStatus by remember { mutableStateOf("") }
 

@@ -28,5 +28,5 @@ jobs:
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: somnath-representative-debug-apk
+          name: somnath-representative-apk-debug
           path: app/build/outputs/apk/debug/*.apk

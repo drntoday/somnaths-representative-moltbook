@@ -1,6 +1,7 @@
 package com.somnath.representative.data
 
 import android.content.Context
+import com.somnath.representative.BuildConfig
 import java.time.LocalDate
 
 private const val PREFS_NAME = "somnath_rep_prefs"
@@ -45,10 +46,16 @@ object SchedulerPrefs {
     }
 
     fun isDebugToolsEnabled(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_ENABLE_DEBUG_TOOLS, false)
+        if (BuildConfig.DEBUG) {
+            prefs(context).getBoolean(KEY_ENABLE_DEBUG_TOOLS, false)
+        } else {
+            prefs(context).edit().putBoolean(KEY_ENABLE_DEBUG_TOOLS, false).apply()
+            false
+        }
 
     fun setDebugToolsEnabled(context: Context, enabled: Boolean) {
-        prefs(context).edit().putBoolean(KEY_ENABLE_DEBUG_TOOLS, enabled).apply()
+        val value = if (BuildConfig.DEBUG) enabled else false
+        prefs(context).edit().putBoolean(KEY_ENABLE_DEBUG_TOOLS, value).apply()
     }
 
     fun incrementErrors(context: Context) {
