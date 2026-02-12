@@ -44,7 +44,7 @@ import com.somnath.representative.duplicate.StubThreadDuplicationGate
 import com.somnath.representative.duplicate.TinyFingerprintCacheStore
 import com.somnath.representative.factpack.FactPack
 import com.somnath.representative.factpack.FactPackBuilder
-import com.somnath.representative.inference.LocalReadyPhiInferenceEngine
+import com.somnath.representative.ai.PhiRuntime
 import com.somnath.representative.moltbook.OkHttpMoltbookApi
 import com.somnath.representative.moltbook.PostSummary
 import com.somnath.representative.rss.RssFetcher
@@ -72,9 +72,9 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
     val searchProviderConfigLoader = remember { SearchProviderConfigLoader() }
     val apiKeyStore = remember { ApiKeyStore(context) }
     val moltbookApi = remember { OkHttpMoltbookApi(apiKeyProvider = { apiKeyStore.getApiKey() }) }
-    val phiInferenceEngine = remember { LocalReadyPhiInferenceEngine() }
+    val phiRuntime = remember { PhiRuntime() }
     val tinyCacheStore = remember { TinyFingerprintCacheStore(context) }
-    val tinyCacheGate = remember { LocalTinyCacheGate(tinyCacheStore, phiInferenceEngine) }
+    val tinyCacheGate = remember { LocalTinyCacheGate(tinyCacheStore, phiRuntime) }
     val selfHistoryGate = remember { StubSelfHistoryGate() }
     val threadDuplicationGate = remember { StubThreadDuplicationGate() }
     val rssFetcher = remember { RssFetcher() }
@@ -360,24 +360,19 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
 
         Button(
             onClick = {
-                val generationResult = phiInferenceEngine.generate(prompt = m4Prompt)
-                m4Status = generationResult.fold(
-                    onSuccess = {
-                        val safetyResult = safetyGuard.evaluate(
-                            threadText = m4Prompt,
-                            draftText = clampDisplayWordCount(it),
-                            factPack = m5FactPack
-                        )
-                        m4Confidence = safetyResult.confidence
-                        m4Decision = "${safetyResult.decision} (${safetyResult.reason})"
-                        if (safetyResult.decision == SafetyDecision.SKIP) {
-                            "SKIP: ${safetyResult.reason}"
-                        } else {
-                            safetyResult.finalText
-                        }
-                    },
-                    onFailure = { error -> error.message ?: "Generation failed" }
+                val generationOutput = phiRuntime.generate(prompt = m4Prompt)
+                val safetyResult = safetyGuard.evaluate(
+                    threadText = m4Prompt,
+                    draftText = clampDisplayWordCount(generationOutput),
+                    factPack = m5FactPack
                 )
+                m4Confidence = safetyResult.confidence
+                m4Decision = "${safetyResult.decision} (${safetyResult.reason})"
+                m4Status = if (safetyResult.decision == SafetyDecision.SKIP) {
+                    "SKIP: ${safetyResult.reason}"
+                } else {
+                    safetyResult.finalText
+                }
             },
             modifier = Modifier.fillMaxWidth()
         ) {

@@ -1,6 +1,6 @@
 package com.somnath.representative.duplicate
 
-import com.somnath.representative.inference.PhiInferenceEngine
+import com.somnath.representative.ai.PhiRuntime
 
 enum class GateStatus {
     ALLOW,
@@ -47,7 +47,7 @@ data class LocalGateEvaluation(
 
 class LocalTinyCacheGate(
     private val cacheStore: TinyFingerprintCacheStore,
-    private val phiInferenceEngine: PhiInferenceEngine
+    private val phiRuntime: PhiRuntime
 ) {
     private val keywordIndex = mutableMapOf<String, Set<String>>()
 
@@ -107,7 +107,7 @@ class LocalTinyCacheGate(
 
     private fun rewriteOnce(draftText: String): String {
         val prompt = "Rewrite this text to be clearly different in wording and angle while keeping calm tone: $draftText"
-        val rewritten = phiInferenceEngine.generate(prompt = prompt).getOrNull()?.trim().orEmpty()
+        val rewritten = phiRuntime.generate(prompt = prompt).trim()
         return rewritten.ifBlank { draftText }
     }
 
