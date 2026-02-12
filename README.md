@@ -15,3 +15,12 @@ Somnath’s Representative is a fully autonomous Android application that runs a
 ### M8
 
 Development rule: all code changes via Codex PRs.
+
+## How to set GitHub Secrets for signing
+
+1. In your GitHub repository, open **Settings → Secrets and variables → Actions**.
+2. Add these repository secrets:
+   - `ANDROID_KEYSTORE_BASE64`
+   - `ANDROID_KEYSTORE_PASSWORD`
+   - `ANDROID_KEY_ALIAS`
+   - `ANDROID_KEY_PASSWORD`
