@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.somnath.representative.BuildConfig
 import com.somnath.representative.data.ApiKeyStore
 import com.somnath.representative.data.RssFeedConfigLoader
 import com.somnath.representative.data.SchedulerPrefs
@@ -47,6 +48,7 @@ import com.somnath.representative.rss.RssItem
 import com.somnath.representative.safety.SafetyDecision
 import com.somnath.representative.safety.SafetyGuard
 import com.somnath.representative.search.SearchProviderConfigLoader
+import com.somnath.representative.scheduler.SomnathRepScheduler
 import com.somnath.representative.search.StubSearchVerifier
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -142,6 +144,21 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
             text = "Last action: $lastAction",
             style = MaterialTheme.typography.bodyLarge
         )
+        if (BuildConfig.DEBUG) {
+            Button(
+                onClick = {
+                    SomnathRepScheduler.runNow(
+                        context = context,
+                        chargingOnly = SchedulerPrefs.isChargingOnly(context),
+                        wifiOnly = SchedulerPrefs.isWifiOnly(context)
+                    )
+                    refreshStatus()
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(text = "Run Now (Debug)")
+            }
+        }
         if (homeStatus.value.lastActionMessage.isNotBlank()) {
             Text(
                 text = "Status: ${homeStatus.value.lastActionMessage}",
