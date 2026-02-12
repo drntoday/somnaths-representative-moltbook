@@ -44,6 +44,8 @@ import com.somnath.representative.moltbook.OkHttpMoltbookApi
 import com.somnath.representative.moltbook.PostSummary
 import com.somnath.representative.rss.RssFetcher
 import com.somnath.representative.rss.RssItem
+import com.somnath.representative.safety.SafetyDecision
+import com.somnath.representative.safety.SafetyGuard
 import com.somnath.representative.search.SearchProviderConfigLoader
 import com.somnath.representative.search.StubSearchVerifier
 import kotlinx.coroutines.Dispatchers
@@ -73,6 +75,7 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
     val rssFetcher = remember { RssFetcher() }
     val searchVerifier = remember { StubSearchVerifier() }
     val factPackBuilder = remember { FactPackBuilder() }
+    val safetyGuard = remember { SafetyGuard() }
 
     var fetchedPosts by remember { mutableStateOf<List<PostSummary>>(emptyList()) }
     var m3Status by remember { mutableStateOf("Idle") }
@@ -80,11 +83,15 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
         mutableStateOf("Write a calm 2-sentence reply about building Android apps.")
     }
     var m4Status by remember { mutableStateOf("Idle") }
+    var m4Confidence by remember { mutableStateOf<Int?>(null) }
+    var m4Decision by remember { mutableStateOf<String?>(null) }
 
     var m5Topic by remember { mutableStateOf("Latest Android AI release") }
     var m5Status by remember { mutableStateOf("Idle") }
     var m5FactPack by remember { mutableStateOf<FactPack?>(null) }
     var tinyCacheCount by remember { mutableStateOf(tinyCacheStore.getRecentFingerprints().size) }
+    var pendingManualPostDraft by remember { mutableStateOf<String?>(null) }
+    var pendingManualPostId by remember { mutableStateOf<String?>(null) }
 
     fun refreshStatus() {
         homeStatus.value = SchedulerPrefs.getHomeStatus(context)
@@ -235,7 +242,33 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
                         statusParts.add(threadDecision.message)
                     }
 
-                    val result = moltbookApi.postComment(postId = targetPostId, body = localGate.finalDraftText)
+                    val threadText = buildString {
+                        append(fetchedPosts.first().title.orEmpty())
+                        append('\n')
+                        append(fetchedPosts.first().body.orEmpty())
+                    }
+                    val safetyResult = safetyGuard.evaluate(
+                        threadText = threadText,
+                        draftText = localGate.finalDraftText,
+                        factPack = null
+                    )
+                    statusParts.add("Safety=${safetyResult.decision} confidence=${safetyResult.confidence}")
+
+                    if (safetyResult.decision == SafetyDecision.SKIP) {
+                        m3Status = "Skipped: ${safetyResult.reason} (${statusParts.joinToString(" | ")})"
+                        pendingManualPostDraft = null
+                        pendingManualPostId = null
+                        return@launch
+                    }
+
+                    if (safetyResult.decision == SafetyDecision.ASK_QUESTION) {
+                        pendingManualPostDraft = safetyResult.finalText
+                        pendingManualPostId = targetPostId
+                        m3Status = "Ask-question mode: ${safetyResult.reason}. Press Post Anyway to post neutral question."
+                        return@launch
+                    }
+
+                    val result = moltbookApi.postComment(postId = targetPostId, body = safetyResult.finalText)
                     m3Status = result.fold(
                         onSuccess = {
                             tinyCacheGate.registerPostedFingerprint(localGate.finalFingerprint, type = "comment")
@@ -257,6 +290,33 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
             Text(text = "Test: Post Comment")
         }
 
+        Button(
+            onClick = {
+                coroutineScope.launch {
+                    val postId = pendingManualPostId
+                    val draft = pendingManualPostDraft
+                    if (postId.isNullOrBlank() || draft.isNullOrBlank()) {
+                        m3Status = "No pending neutral question to post."
+                        return@launch
+                    }
+
+                    val result = moltbookApi.postComment(postId = postId, body = draft)
+                    m3Status = result.fold(
+                        onSuccess = {
+                            pendingManualPostDraft = null
+                            pendingManualPostId = null
+                            "Post Anyway succeeded on post: $postId"
+                        },
+                        onFailure = { it.message ?: "Post Anyway failed" }
+                    )
+                }
+            },
+            enabled = !pendingManualPostDraft.isNullOrBlank(),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(text = "Post Anyway")
+        }
+
         Text(text = "M3 status: $m3Status", style = MaterialTheme.typography.bodyMedium)
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -272,13 +332,32 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
             onClick = {
                 val generationResult = phiInferenceEngine.generate(prompt = m4Prompt)
                 m4Status = generationResult.fold(
-                    onSuccess = { clampDisplayWordCount(it) },
+                    onSuccess = {
+                        val safetyResult = safetyGuard.evaluate(
+                            threadText = m4Prompt,
+                            draftText = clampDisplayWordCount(it),
+                            factPack = m5FactPack
+                        )
+                        m4Confidence = safetyResult.confidence
+                        m4Decision = "${safetyResult.decision} (${safetyResult.reason})"
+                        if (safetyResult.decision == SafetyDecision.SKIP) {
+                            "SKIP: ${safetyResult.reason}"
+                        } else {
+                            safetyResult.finalText
+                        }
+                    },
                     onFailure = { error -> error.message ?: "Generation failed" }
                 )
             },
             modifier = Modifier.fillMaxWidth()
         ) {
             Text(text = "Test: Generate (Phi)")
+        }
+        m4Confidence?.let {
+            Text(text = "M4 confidence: $it", style = MaterialTheme.typography.bodyMedium)
+        }
+        m4Decision?.let {
+            Text(text = "M4 safety: $it", style = MaterialTheme.typography.bodyMedium)
         }
         Text(text = "M4 output: $m4Status", style = MaterialTheme.typography.bodyMedium)
 
