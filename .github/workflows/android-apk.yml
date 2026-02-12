@@ -22,21 +22,11 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
 
-      - name: Build APK (prefer release)
-        id: build
-        run: |
-          set -euo pipefail
-
-          if gradle :app:assembleRelease; then
-            echo "artifact_path=app/build/outputs/apk/release/*.apk" >> "$GITHUB_OUTPUT"
-          else
-            echo "Release build failed, falling back to debug build"
-            gradle :app:assembleDebug
-            echo "artifact_path=app/build/outputs/apk/debug/*.apk" >> "$GITHUB_OUTPUT"
-          fi
+      - name: Build APK (debug)
+        run: gradle :app:assembleDebug
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: somnath-representative-apk
-          path: ${{ steps.build.outputs.artifact_path }}
+          path: app/build/outputs/apk/debug/*.apk
