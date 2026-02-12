@@ -28,7 +28,10 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import com.somnath.representative.BuildConfig
+import androidx.work.Constraints
+import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
 import com.somnath.representative.data.ApiKeyStore
 import com.somnath.representative.data.RssFeedConfigLoader
 import com.somnath.representative.data.SchedulerPrefs
@@ -121,6 +124,7 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
     }
 
     val hasSubmolts = submolts.isNotEmpty()
+    val debugToolsEnabled = SchedulerPrefs.isDebugToolsEnabled(context)
 
     Column(
         modifier = Modifier
@@ -154,6 +158,30 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
             style = MaterialTheme.typography.bodyLarge
         )
         Text(text = "Errors: ${homeStatus.value.errorsCount}", style = MaterialTheme.typography.bodyLarge)
+        if (debugToolsEnabled) {
+            Button(
+                onClick = {
+                    val constraintsBuilder = Constraints.Builder()
+                        .setRequiredNetworkType(
+                            if (SchedulerPrefs.isWifiOnly(context)) {
+                                NetworkType.UNMETERED
+                            } else {
+                                NetworkType.CONNECTED
+                            }
+                        )
+                    if (SchedulerPrefs.isChargingOnly(context)) {
+                        constraintsBuilder.setRequiresCharging(true)
+                    }
+                    val request = OneTimeWorkRequestBuilder<com.somnath.representative.scheduler.SomnathRepWorker>()
+                        .setConstraints(constraintsBuilder.build())
+                        .build()
+                    WorkManager.getInstance(context).enqueue(request)
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(text = "Run Now (Debug Tools)")
+            }
+        }
         Text(text = "Tiny cache entries: $tinyCacheCount/20", style = MaterialTheme.typography.bodyLarge)
         Button(
             onClick = {
