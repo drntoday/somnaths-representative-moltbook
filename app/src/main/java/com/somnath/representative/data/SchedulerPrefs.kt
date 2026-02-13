@@ -16,6 +16,7 @@ object SchedulerPrefs {
     private const val KEY_ACTIONS_TODAY_DATE = "actionsTodayDate"
     private const val KEY_SCHEDULER_ENABLED = "schedulerEnabled"
     private const val KEY_ENABLE_DEBUG_TOOLS = "enable_debug_tools"
+    private const val KEY_TOPIC_QUERY = "topicQuery"
 
     data class HomeStatus(
         val schedulerEnabled: Boolean,
@@ -57,6 +58,13 @@ object SchedulerPrefs {
         val value = if (BuildConfig.DEBUG) enabled else false
         prefs(context).edit().putBoolean(KEY_ENABLE_DEBUG_TOOLS, value).apply()
     }
+
+    fun setTopicQuery(context: Context, topicQuery: String) {
+        prefs(context).edit().putString(KEY_TOPIC_QUERY, topicQuery).apply()
+    }
+
+    fun getTopicQuery(context: Context): String =
+        prefs(context).getString(KEY_TOPIC_QUERY, "") ?: ""
 
     fun incrementErrors(context: Context) {
         val pref = prefs(context)
