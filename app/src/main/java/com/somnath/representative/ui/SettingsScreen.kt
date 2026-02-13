@@ -46,6 +46,7 @@ fun SettingsScreen(onBack: () -> Unit) {
     var wifiOnly by remember { mutableStateOf(SchedulerPrefs.isWifiOnly(context)) }
     var enableDebugTools by remember { mutableStateOf(BuildConfig.DEBUG && SchedulerPrefs.isDebugToolsEnabled(context)) }
     var autonomousModeEnabled by remember { mutableStateOf(SchedulerPrefs.isAutonomousModeEnabled(context)) }
+    var emergencyStopEnabled by remember { mutableStateOf(SchedulerPrefs.isEmergencyStopEnabled(context)) }
     var autoDownloadModel by remember { mutableStateOf(phiModelManager.isAutoDownloadEnabled()) }
     var downloadWifiOnly by remember { mutableStateOf(phiModelManager.isWifiOnlyEnabled()) }
     var downloadStatus by remember { mutableStateOf(phiModelManager.getInitialStatus()) }
@@ -108,6 +109,15 @@ fun SettingsScreen(onBack: () -> Unit) {
         Text(
             text = "When enabled, app may post automatically under strict limits.",
             style = MaterialTheme.typography.bodyMedium
+        )
+
+        Text(text = "Emergency Stop (Disable all posting)", style = MaterialTheme.typography.bodyLarge)
+        Switch(
+            checked = emergencyStopEnabled,
+            onCheckedChange = {
+                emergencyStopEnabled = it
+                SchedulerPrefs.setEmergencyStopEnabled(context, it)
+            }
         )
 
         Spacer(modifier = Modifier.height(8.dp))
