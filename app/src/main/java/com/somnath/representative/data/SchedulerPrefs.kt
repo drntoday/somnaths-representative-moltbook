@@ -34,6 +34,11 @@ object SchedulerPrefs {
 
     private const val BASE_INTERVAL_MULTIPLIER = 1.0f
     private const val MAX_INTERVAL_MULTIPLIER = 8.0f
+    private const val BASE_INTERVAL_MINUTES = 45L
+    private const val MAX_ADAPTIVE_DELAY_MINUTES = 360L
+
+    const val SCHEDULE_MODE_PERIODIC = "periodic"
+    const val SCHEDULE_MODE_ADAPTIVE_ONE_TIME_CHAIN = "adaptive_one_time_chain"
 
     enum class CycleOutcome {
         NO_CANDIDATE,
@@ -79,6 +84,9 @@ object SchedulerPrefs {
     fun setSchedulerEnabled(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_SCHEDULER_ENABLED, enabled).apply()
     }
+
+    fun isSchedulerEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_SCHEDULER_ENABLED, false)
 
     fun isDebugToolsEnabled(context: Context): Boolean =
         if (BuildConfig.DEBUG) {
@@ -133,6 +141,20 @@ object SchedulerPrefs {
         val multiplier = getGenerationIntervalMultiplier(context)
         return max(15L, (baseMinutes.toFloat() * multiplier).toLong())
     }
+
+    fun getScheduleMode(context: Context): String =
+        if (isAutonomousModeEnabled(context)) SCHEDULE_MODE_ADAPTIVE_ONE_TIME_CHAIN else SCHEDULE_MODE_PERIODIC
+
+    fun getAdaptiveDelayMinutes(context: Context, baseMinutes: Long = BASE_INTERVAL_MINUTES): Long {
+        val raw = (baseMinutes.toFloat() * getGenerationIntervalMultiplier(context)).toLong()
+        return raw.coerceIn(baseMinutes, MAX_ADAPTIVE_DELAY_MINUTES)
+    }
+
+    fun getDisplayedNextRunDelayMinutes(context: Context): Long =
+        when (getScheduleMode(context)) {
+            SCHEDULE_MODE_ADAPTIVE_ONE_TIME_CHAIN -> getAdaptiveDelayMinutes(context)
+            else -> getEffectiveIntervalMinutes(context, BASE_INTERVAL_MINUTES)
+        }
 
     fun updateAdaptiveInterval(context: Context, cycleOutcome: CycleOutcome): Float {
         val pref = prefs(context)

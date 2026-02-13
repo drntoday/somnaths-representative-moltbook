@@ -104,6 +104,9 @@ fun SettingsScreen(onBack: () -> Unit) {
             onCheckedChange = {
                 autonomousModeEnabled = it
                 SchedulerPrefs.setAutonomousModeEnabled(context, it)
+                if (SchedulerPrefs.isSchedulerEnabled(context)) {
+                    SomnathRepScheduler.schedule(context, chargingOnly, wifiOnly)
+                }
             }
         )
         Text(

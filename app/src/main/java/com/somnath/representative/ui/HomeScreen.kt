@@ -77,6 +77,8 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
     val autonomousModeEnabled = remember { mutableStateOf(SchedulerPrefs.isAutonomousModeEnabled(context)) }
     val emergencyStopEnabled = remember { mutableStateOf(SchedulerPrefs.isEmergencyStopEnabled(context)) }
     val autonomousRateStatus = remember { mutableStateOf(AutonomousPostRateLimiter.getStatus(context)) }
+    val scheduleMode = remember { mutableStateOf(SchedulerPrefs.getScheduleMode(context)) }
+    val nextRunDelayMinutes = remember { mutableStateOf(SchedulerPrefs.getDisplayedNextRunDelayMinutes(context)) }
     val nextAutoPostAllowedAt = remember { mutableStateOf(SchedulerPrefs.getNextAutoPostAllowedAt(context)) }
     val auditEvents = remember { mutableStateOf(SchedulerPrefs.getRecentAuditEvents(context, limit = 3)) }
     val lastGeneratedCandidate = remember { mutableStateOf(LastGeneratedCandidateStore.get()) }
@@ -125,6 +127,8 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
         autonomousModeEnabled.value = SchedulerPrefs.isAutonomousModeEnabled(context)
         emergencyStopEnabled.value = SchedulerPrefs.isEmergencyStopEnabled(context)
         autonomousRateStatus.value = AutonomousPostRateLimiter.getStatus(context)
+        scheduleMode.value = SchedulerPrefs.getScheduleMode(context)
+        nextRunDelayMinutes.value = SchedulerPrefs.getDisplayedNextRunDelayMinutes(context)
         nextAutoPostAllowedAt.value = SchedulerPrefs.getNextAutoPostAllowedAt(context)
         auditEvents.value = SchedulerPrefs.getRecentAuditEvents(context, limit = 3)
         lastGeneratedCandidate.value = LastGeneratedCandidateStore.get()
@@ -180,6 +184,14 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
         Spacer(modifier = Modifier.height(8.dp))
         Text(
             text = "Scheduler: ${if (homeStatus.value.schedulerEnabled) "Enabled" else "Disabled"}",
+            style = MaterialTheme.typography.bodyLarge
+        )
+        Text(
+            text = "Schedule mode: ${if (scheduleMode.value == SchedulerPrefs.SCHEDULE_MODE_ADAPTIVE_ONE_TIME_CHAIN) "Adaptive" else "Periodic"}",
+            style = MaterialTheme.typography.bodyLarge
+        )
+        Text(
+            text = "Next run delay: ${nextRunDelayMinutes.value}m",
             style = MaterialTheme.typography.bodyLarge
         )
         Text(
