@@ -17,6 +17,7 @@ object SchedulerPrefs {
     private const val KEY_SCHEDULER_ENABLED = "schedulerEnabled"
     private const val KEY_ENABLE_DEBUG_TOOLS = "enable_debug_tools"
     private const val KEY_TOPIC_QUERY = "topicQuery"
+    private const val KEY_AUTONOMOUS_MODE_ENABLED = "autonomousModeEnabled"
 
     data class HomeStatus(
         val schedulerEnabled: Boolean,
@@ -65,6 +66,13 @@ object SchedulerPrefs {
 
     fun getTopicQuery(context: Context): String =
         prefs(context).getString(KEY_TOPIC_QUERY, "") ?: ""
+
+    fun isAutonomousModeEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_AUTONOMOUS_MODE_ENABLED, false)
+
+    fun setAutonomousModeEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_AUTONOMOUS_MODE_ENABLED, enabled).apply()
+    }
 
     fun incrementErrors(context: Context) {
         val pref = prefs(context)

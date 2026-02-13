@@ -45,6 +45,7 @@ fun SettingsScreen(onBack: () -> Unit) {
     var chargingOnly by remember { mutableStateOf(SchedulerPrefs.isChargingOnly(context)) }
     var wifiOnly by remember { mutableStateOf(SchedulerPrefs.isWifiOnly(context)) }
     var enableDebugTools by remember { mutableStateOf(BuildConfig.DEBUG && SchedulerPrefs.isDebugToolsEnabled(context)) }
+    var autonomousModeEnabled by remember { mutableStateOf(SchedulerPrefs.isAutonomousModeEnabled(context)) }
     var autoDownloadModel by remember { mutableStateOf(phiModelManager.isAutoDownloadEnabled()) }
     var downloadWifiOnly by remember { mutableStateOf(phiModelManager.isWifiOnlyEnabled()) }
     var downloadStatus by remember { mutableStateOf(phiModelManager.getInitialStatus()) }
@@ -94,6 +95,20 @@ fun SettingsScreen(onBack: () -> Unit) {
                 }
             )
         }
+
+
+        Text(text = "Autonomous Mode (Safe)", style = MaterialTheme.typography.bodyLarge)
+        Switch(
+            checked = autonomousModeEnabled,
+            onCheckedChange = {
+                autonomousModeEnabled = it
+                SchedulerPrefs.setAutonomousModeEnabled(context, it)
+            }
+        )
+        Text(
+            text = "When enabled, app may post automatically under strict limits.",
+            style = MaterialTheme.typography.bodyMedium
+        )
 
         Spacer(modifier = Modifier.height(8.dp))
         Button(
