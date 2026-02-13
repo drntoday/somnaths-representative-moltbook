@@ -36,6 +36,8 @@ object SchedulerPrefs {
     private const val KEY_M12_REWRITES_ATTEMPTED = "m12_rewrites_attempted"
     private const val KEY_M12_REWRITES_USED = "m12_rewrites_used"
     private const val KEY_M12_SKIPPED_AFTER_SELFCHECK = "m12_skipped_after_selfcheck"
+    private const val KEY_AUTO_POST_ELIGIBLE = "autoPostEligible"
+    private const val KEY_AUTO_POST_BLOCK_REASON = "autoPostBlockReason"
     private const val MAX_AUDIT_EVENTS = 10
     private const val MAX_CYCLE_OUTCOMES = 3
 
@@ -219,6 +221,20 @@ object SchedulerPrefs {
 
     fun getSelfCheckIssues(context: Context): String =
         prefs(context).getString(KEY_SELF_CHECK_ISSUES, "none")?.ifBlank { "none" } ?: "none"
+
+    fun setAutoPostEligibility(context: Context, eligible: Boolean, blockedBy: String = "") {
+        prefs(context).edit()
+            .putBoolean(KEY_AUTO_POST_ELIGIBLE, eligible)
+            .putString(KEY_AUTO_POST_BLOCK_REASON, blockedBy.take(80))
+            .apply()
+    }
+
+    fun getAutoPostEligibilitySummary(context: Context): String {
+        val eligible = prefs(context).getBoolean(KEY_AUTO_POST_ELIGIBLE, false)
+        if (eligible) return "YES"
+        val reason = prefs(context).getString(KEY_AUTO_POST_BLOCK_REASON, "")?.trim().orEmpty()
+        return if (reason.isBlank()) "NO" else "NO ($reason)"
+    }
 
     fun incrementM12TotalGenerations(context: Context) {
         incrementCounter(context, KEY_M12_TOTAL_GENERATIONS)

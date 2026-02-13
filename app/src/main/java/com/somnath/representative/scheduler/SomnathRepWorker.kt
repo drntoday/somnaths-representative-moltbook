@@ -31,7 +31,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 private const val DEFAULT_TOPIC = "Android background tasks"
-private const val AUTO_POST_CONFIDENCE_THRESHOLD = 80
+private const val AUTO_POST_CONFIDENCE_THRESHOLD = 85
 private const val GENERATION_COOLDOWN_MS = 30L * 60L * 1000L
 
 class SomnathRepWorker(
@@ -183,6 +183,7 @@ class SomnathRepWorker(
             if (!critique.needsRewrite) {
                 SchedulerPrefs.incrementM12OkWithoutRewrite(applicationContext)
             }
+            val selfCheckIsClean = !critique.needsRewrite && critique.okToPost && critique.issues.isEmpty()
             SchedulerPrefs.setSelfCheckSummary(applicationContext, status = selfCheckStatus, issues = selfCheckIssues)
             PromptStyleStatsStore.applyScoreDelta(applicationContext, selectedStyle, delta = 1)
             TopicHistoryStore.applyScoreDelta(applicationContext, topic, delta = 1)
@@ -193,11 +194,16 @@ class SomnathRepWorker(
             )
             val localGate = tinyCacheGate.evaluateCommentDraft(finalSafetyResult.finalText)
             if (localGate.decision.status == GateStatus.SKIP) {
-                LastGeneratedCandidateStore.clear()
+                LastGeneratedCandidateStore.set(
+                    candidateText = localGate.finalDraftText,
+                    candidateTopic = topic,
+                    candidateStyle = selectedStyle
+                )
+                SchedulerPrefs.setAutoPostEligibility(applicationContext, eligible = false, blockedBy = "duplicate gate")
                 PromptStyleStatsStore.applyScoreDelta(applicationContext, selectedStyle, delta = -1)
                 TopicHistoryStore.applyScoreDelta(applicationContext, topic, delta = -1)
                 SchedulerPrefs.recordAuditEvent(applicationContext, "SKIPPED_DUPLICATE", "Duplicate")
-                SchedulerPrefs.recordScheduledCycle(applicationContext, "Skipped duplicate")
+                SchedulerPrefs.recordScheduledCycle(applicationContext, "Auto-post blocked: duplicate gate")
                 SchedulerPrefs.updateAdaptiveInterval(applicationContext, SchedulerPrefs.CycleOutcome.NO_CANDIDATE)
                 refreshPeriodicSchedule()
                 return Result.success()
@@ -216,46 +222,39 @@ class SomnathRepWorker(
             SchedulerPrefs.updateAdaptiveInterval(applicationContext, SchedulerPrefs.CycleOutcome.GENERATED)
             refreshPeriodicSchedule()
 
-            if (SchedulerPrefs.isEmergencyStopEnabled(applicationContext)) {
-                SchedulerPrefs.recordAuditEvent(applicationContext, "SKIPPED_SAFETY", "Emergency stop")
-                SchedulerPrefs.recordScheduledCycle(applicationContext, "Posting disabled by Emergency Stop")
+            val autoPostBlockReason = when {
+                !SchedulerPrefs.isAutonomousModeEnabled(applicationContext) -> "autonomous off"
+                SchedulerPrefs.isEmergencyStopEnabled(applicationContext) -> "emergency stop"
+                finalSafetyResult.decision != SafetyDecision.ALLOW -> "safety blocked"
+                finalSafetyResult.confidence < AUTO_POST_CONFIDENCE_THRESHOLD -> "confidence < $AUTO_POST_CONFIDENCE_THRESHOLD"
+                !selfCheckIsClean -> "self-check not clean"
+                localGate.decision.status != GateStatus.ALLOW -> "duplicate gate"
+                SchedulerPrefs.isAutoPostInCooldown(applicationContext) -> "backoff cooldown"
+                TopicHistoryStore.choosePostableTopic(applicationContext, topic) != topic -> "topic cooldown"
+                !AutonomousPostRateLimiter.canPostNow(applicationContext) -> "rate limit"
+                else -> null
+            }
+
+            if (autoPostBlockReason != null) {
+                SchedulerPrefs.setAutoPostEligibility(applicationContext, eligible = false, blockedBy = autoPostBlockReason)
+                when (autoPostBlockReason) {
+                    "emergency stop" -> SchedulerPrefs.recordAuditEvent(applicationContext, "SKIPPED_SAFETY", "Emergency stop")
+                    "backoff cooldown", "topic cooldown", "rate limit" -> {
+                        SchedulerPrefs.recordAuditEvent(applicationContext, "SKIPPED_RATE_LIMIT", autoPostBlockReason)
+                        SchedulerPrefs.updateAdaptiveInterval(applicationContext, SchedulerPrefs.CycleOutcome.SKIPPED_RATE_LIMIT)
+                        refreshPeriodicSchedule()
+                    }
+                }
+                val cycleMessage = if (autoPostBlockReason == "autonomous off") {
+                    "Generated candidate successfully"
+                } else {
+                    "Auto-post blocked: $autoPostBlockReason"
+                }
+                SchedulerPrefs.recordScheduledCycle(applicationContext, cycleMessage)
                 return Result.success()
             }
 
-            if (!SchedulerPrefs.isAutonomousModeEnabled(applicationContext)) {
-                SchedulerPrefs.recordScheduledCycle(applicationContext, "Generated candidate successfully")
-                return Result.success()
-            }
-
-            if (finalSafetyResult.confidence < AUTO_POST_CONFIDENCE_THRESHOLD) {
-                SchedulerPrefs.recordScheduledCycle(applicationContext, "Auto-post skipped: confidence too low")
-                return Result.success()
-            }
-
-            if (SchedulerPrefs.isAutoPostInCooldown(applicationContext)) {
-                SchedulerPrefs.recordAuditEvent(applicationContext, "SKIPPED_RATE_LIMIT", "Cooldown")
-                SchedulerPrefs.recordScheduledCycle(applicationContext, "Auto-post cooldown active")
-                SchedulerPrefs.updateAdaptiveInterval(applicationContext, SchedulerPrefs.CycleOutcome.SKIPPED_RATE_LIMIT)
-                refreshPeriodicSchedule()
-                return Result.success()
-            }
-
-            val postableTopic = TopicHistoryStore.choosePostableTopic(applicationContext, topic)
-            if (postableTopic == null || postableTopic != topic) {
-                SchedulerPrefs.recordAuditEvent(applicationContext, "SKIPPED_RATE_LIMIT", "Topic cooldown active")
-                SchedulerPrefs.recordScheduledCycle(applicationContext, "Auto-post skipped: topic cooldown active")
-                SchedulerPrefs.updateAdaptiveInterval(applicationContext, SchedulerPrefs.CycleOutcome.SKIPPED_RATE_LIMIT)
-                refreshPeriodicSchedule()
-                return Result.success()
-            }
-
-            if (!AutonomousPostRateLimiter.canPostNow(applicationContext)) {
-                SchedulerPrefs.recordAuditEvent(applicationContext, "SKIPPED_RATE_LIMIT", "Rate limit")
-                SchedulerPrefs.recordScheduledCycle(applicationContext, "Rate limit reached")
-                SchedulerPrefs.updateAdaptiveInterval(applicationContext, SchedulerPrefs.CycleOutcome.SKIPPED_RATE_LIMIT)
-                refreshPeriodicSchedule()
-                return Result.success()
-            }
+            SchedulerPrefs.setAutoPostEligibility(applicationContext, eligible = true)
 
             if (configuredSubmolts.isEmpty()) {
                 SchedulerPrefs.recordScheduledCycle(applicationContext, "Auto-post skipped: no submolts")
