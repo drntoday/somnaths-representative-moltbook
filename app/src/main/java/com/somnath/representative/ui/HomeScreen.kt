@@ -32,6 +32,7 @@ import androidx.work.Constraints
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
+import androidx.work.workDataOf
 import com.somnath.representative.BuildConfig
 import com.somnath.representative.data.ApiKeyStore
 import com.somnath.representative.data.AutonomousPostRateLimiter
@@ -440,6 +441,7 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
                         constraintsBuilder.setRequiresCharging(true)
                     }
                     val request = OneTimeWorkRequestBuilder<com.somnath.representative.scheduler.SomnathRepWorker>()
+                        .setInputData(workDataOf("manualActionTriggered" to true))
                         .setConstraints(constraintsBuilder.build())
                         .build()
                     WorkManager.getInstance(context).enqueue(request)
@@ -654,18 +656,22 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
 
         Button(
             onClick = {
-                val generationOutput = phiRuntime.generate(prompt = m4Prompt)
-                val safetyResult = safetyGuard.evaluate(
-                    threadText = m4Prompt,
-                    draftText = clampDisplayWordCount(generationOutput),
-                    factPack = m5FactPack
-                )
-                m4Confidence = safetyResult.confidence
-                m4Decision = "${safetyResult.decision} (${safetyResult.reason})"
-                m4Status = if (safetyResult.decision == SafetyDecision.SKIP) {
-                    "SKIP: ${safetyResult.reason}"
-                } else {
-                    safetyResult.finalText
+                coroutineScope.launch {
+                    val generationOutput = withContext(Dispatchers.Default) {
+                        phiRuntime.generate(prompt = m4Prompt)
+                    }
+                    val safetyResult = safetyGuard.evaluate(
+                        threadText = m4Prompt,
+                        draftText = clampDisplayWordCount(generationOutput),
+                        factPack = m5FactPack
+                    )
+                    m4Confidence = safetyResult.confidence
+                    m4Decision = "${safetyResult.decision} (${safetyResult.reason})"
+                    m4Status = if (safetyResult.decision == SafetyDecision.SKIP) {
+                        "SKIP: ${safetyResult.reason}"
+                    } else {
+                        safetyResult.finalText
+                    }
                 }
             },
             modifier = Modifier.fillMaxWidth()
