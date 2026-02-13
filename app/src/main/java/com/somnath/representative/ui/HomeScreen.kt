@@ -39,6 +39,7 @@ import com.somnath.representative.data.LastGeneratedCandidateStore
 import com.somnath.representative.data.RssFeedConfigLoader
 import com.somnath.representative.data.SchedulerPrefs
 import com.somnath.representative.data.SubmoltConfigLoader
+import com.somnath.representative.data.TopicHistoryStore
 import com.somnath.representative.duplicate.GateStatus
 import com.somnath.representative.duplicate.LocalTinyCacheGate
 import com.somnath.representative.duplicate.StubSelfHistoryGate
@@ -76,6 +77,7 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
     val nextAutoPostAllowedAt = remember { mutableStateOf(SchedulerPrefs.getNextAutoPostAllowedAt(context)) }
     val auditEvents = remember { mutableStateOf(SchedulerPrefs.getRecentAuditEvents(context, limit = 3)) }
     val lastGeneratedCandidate = remember { mutableStateOf(LastGeneratedCandidateStore.get()) }
+    val adaptiveTopicStats = remember { mutableStateOf(TopicHistoryStore.getAdaptiveStats(context)) }
     val submolts = remember { SubmoltConfigLoader().load(context) }
     val rssFeedLoader = remember { RssFeedConfigLoader() }
     val searchProviderConfigLoader = remember { SearchProviderConfigLoader() }
@@ -121,6 +123,7 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
         nextAutoPostAllowedAt.value = SchedulerPrefs.getNextAutoPostAllowedAt(context)
         auditEvents.value = SchedulerPrefs.getRecentAuditEvents(context, limit = 3)
         lastGeneratedCandidate.value = LastGeneratedCandidateStore.get()
+        adaptiveTopicStats.value = TopicHistoryStore.getAdaptiveStats(context)
     }
 
     LaunchedEffect(Unit) {
@@ -214,6 +217,26 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
         )
         Text(
             text = "Last pipeline: RSS+FactPack -> Safety -> DupGate -> Generated/Skipped",
+            style = MaterialTheme.typography.bodyMedium
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "Adaptive Topic Stats",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold
+        )
+        val topTopicLabel = adaptiveTopicStats.value.topTopic?.let { "${it.topic} (${it.score})" } ?: "—"
+        val lastTopicLabel = adaptiveTopicStats.value.lastTopicUsed?.topic ?: "—"
+        Text(
+            text = "Top topic: $topTopicLabel",
+            style = MaterialTheme.typography.bodyMedium
+        )
+        Text(
+            text = "Total tracked topics: ${adaptiveTopicStats.value.totalTrackedTopics}",
+            style = MaterialTheme.typography.bodyMedium
+        )
+        Text(
+            text = "Last topic used: $lastTopicLabel",
             style = MaterialTheme.typography.bodyMedium
         )
         Spacer(modifier = Modifier.height(8.dp))
@@ -337,10 +360,14 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
                         onSuccess = {
                             tinyCacheGate.registerPostedFingerprint(localGate.finalFingerprint, type = "comment")
                             tinyCacheCount = tinyCacheStore.getRecentFingerprints().size
+                            TopicHistoryStore.applyScoreDelta(context, candidateSnapshot.candidateTopic, delta = 2)
                             SchedulerPrefs.recordAuditEvent(context, "MANUAL_POST_SUCCESS", "Posted")
+                            refreshStatus()
                             "Posted successfully"
                         },
                         onFailure = {
+                            TopicHistoryStore.applyScoreDelta(context, candidateSnapshot.candidateTopic, delta = -3)
+                            refreshStatus()
                             it.message ?: "Post failed"
                         }
                     )
@@ -501,15 +528,21 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
                         onSuccess = {
                             tinyCacheGate.registerPostedFingerprint(localGate.finalFingerprint, type = "comment")
                             tinyCacheCount = tinyCacheStore.getRecentFingerprints().size
+                            TopicHistoryStore.applyScoreDelta(context, "M3 Test comment", delta = 2)
                             val gateSuffix = if (statusParts.isNotEmpty()) {
                                 " (${statusParts.joinToString(" | ")})"
                             } else {
                                 ""
                             }
                             SchedulerPrefs.recordAuditEvent(context, "MANUAL_POST_SUCCESS", "Posted")
+                            refreshStatus()
                             "Post comment succeeded on post: $targetPostId$gateSuffix"
                         },
-                        onFailure = { it.message ?: "Post comment failed" }
+                        onFailure = {
+                            TopicHistoryStore.applyScoreDelta(context, "M3 Test comment", delta = -3)
+                            refreshStatus()
+                            it.message ?: "Post comment failed"
+                        }
                     )
                 }
             },
@@ -541,10 +574,16 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
                         onSuccess = {
                             pendingManualPostDraft = null
                             pendingManualPostId = null
+                            TopicHistoryStore.applyScoreDelta(context, "M3 Ask Question", delta = 2)
                             SchedulerPrefs.recordAuditEvent(context, "MANUAL_POST_SUCCESS", "Posted")
+                            refreshStatus()
                             "Post Anyway succeeded on post: $postId"
                         },
-                        onFailure = { it.message ?: "Post Anyway failed" }
+                        onFailure = {
+                            TopicHistoryStore.applyScoreDelta(context, "M3 Ask Question", delta = -3)
+                            refreshStatus()
+                            it.message ?: "Post Anyway failed"
+                        }
                     )
                 }
             },
