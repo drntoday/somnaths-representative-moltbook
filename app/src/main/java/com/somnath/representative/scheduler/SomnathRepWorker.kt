@@ -95,6 +95,7 @@ class SomnathRepWorker(
             val generatedDraft = withContext(Dispatchers.Default) {
                 inferenceEngine.generate(prompt).trim()
             }
+            SchedulerPrefs.incrementM12TotalGenerations(applicationContext)
 
             val pass1Safety = SafetyGuard().evaluate(
                 threadText = topic,
@@ -125,8 +126,10 @@ class SomnathRepWorker(
             var selfCheckStatus = "OK"
             var selfCheckIssues = critique.issues
             var finalSafetyResult = pass1Safety
+            var rewriteApplied = false
 
             if (critique.needsRewrite) {
+                SchedulerPrefs.incrementM12RewritesAttempted(applicationContext)
                 val rewritePrompt = critique.suggestedRewritePrompt
                     ?: SelfReflectionEngine.buildRewritePrompt(topic, pass1Safety.finalText, critique.issues, factPack)
                 val rewrittenDraft = withContext(Dispatchers.Default) {
@@ -142,6 +145,7 @@ class SomnathRepWorker(
                     SchedulerPrefs.setSelfCheckSummary(applicationContext, status = "Skipped", issues = critique.issues)
                     PromptStyleStatsStore.applyScoreDelta(applicationContext, selectedStyle, delta = -2)
                     TopicHistoryStore.applyScoreDelta(applicationContext, topic, delta = -2)
+                    SchedulerPrefs.incrementM12SkippedAfterSelfCheck(applicationContext)
                     SchedulerPrefs.recordAuditEvent(applicationContext, "SKIPPED_SAFETY", "rewrite failed safety")
                     SchedulerPrefs.recordScheduledCycle(applicationContext, "Skipped: rewrite failed safety")
                     SchedulerPrefs.updateAdaptiveInterval(applicationContext, SchedulerPrefs.CycleOutcome.SKIPPED_SAFETY)
@@ -162,6 +166,7 @@ class SomnathRepWorker(
                     SchedulerPrefs.setSelfCheckSummary(applicationContext, status = "Skipped", issues = postRewriteCritique.issues)
                     PromptStyleStatsStore.applyScoreDelta(applicationContext, selectedStyle, delta = -1)
                     TopicHistoryStore.applyScoreDelta(applicationContext, topic, delta = -1)
+                    SchedulerPrefs.incrementM12SkippedAfterSelfCheck(applicationContext)
                     SchedulerPrefs.recordAuditEvent(applicationContext, "SKIPPED_SAFETY", "rewrite unresolved issues")
                     SchedulerPrefs.recordScheduledCycle(applicationContext, "Skipped: rewrite unresolved issues")
                     SchedulerPrefs.updateAdaptiveInterval(applicationContext, SchedulerPrefs.CycleOutcome.SKIPPED_SAFETY)
@@ -172,8 +177,12 @@ class SomnathRepWorker(
                 finalSafetyResult = pass2Safety
                 selfCheckStatus = "Rewrote"
                 selfCheckIssues = critique.issues
+                rewriteApplied = true
             }
 
+            if (!critique.needsRewrite) {
+                SchedulerPrefs.incrementM12OkWithoutRewrite(applicationContext)
+            }
             SchedulerPrefs.setSelfCheckSummary(applicationContext, status = selfCheckStatus, issues = selfCheckIssues)
             PromptStyleStatsStore.applyScoreDelta(applicationContext, selectedStyle, delta = 1)
             TopicHistoryStore.applyScoreDelta(applicationContext, topic, delta = 1)
@@ -199,6 +208,9 @@ class SomnathRepWorker(
                 candidateTopic = topic,
                 candidateStyle = selectedStyle
             )
+            if (rewriteApplied) {
+                SchedulerPrefs.incrementM12RewritesUsed(applicationContext)
+            }
             SchedulerPrefs.recordGenerationCompleted(applicationContext)
             SchedulerPrefs.recordAuditEvent(applicationContext, "GENERATED", "Draft generated")
             SchedulerPrefs.updateAdaptiveInterval(applicationContext, SchedulerPrefs.CycleOutcome.GENERATED)

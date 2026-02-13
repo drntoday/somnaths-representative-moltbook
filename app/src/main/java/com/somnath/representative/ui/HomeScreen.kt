@@ -83,6 +83,7 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
     val auditEvents = remember { mutableStateOf(SchedulerPrefs.getRecentAuditEvents(context, limit = 3)) }
     val selfCheckStatus = remember { mutableStateOf(SchedulerPrefs.getSelfCheckStatus(context)) }
     val selfCheckIssues = remember { mutableStateOf(SchedulerPrefs.getSelfCheckIssues(context)) }
+    val m12Stats = remember { mutableStateOf(SchedulerPrefs.getM12Stats(context)) }
     val lastGeneratedCandidate = remember { mutableStateOf(LastGeneratedCandidateStore.get()) }
     val adaptiveTopicStats = remember { mutableStateOf(TopicHistoryStore.getAdaptiveStats(context)) }
     val promptStyleScores = remember { mutableStateOf(PromptStyleStatsStore.getScoreMap(context)) }
@@ -135,6 +136,7 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
         auditEvents.value = SchedulerPrefs.getRecentAuditEvents(context, limit = 3)
         selfCheckStatus.value = SchedulerPrefs.getSelfCheckStatus(context)
         selfCheckIssues.value = SchedulerPrefs.getSelfCheckIssues(context)
+        m12Stats.value = SchedulerPrefs.getM12Stats(context)
         lastGeneratedCandidate.value = LastGeneratedCandidateStore.get()
         adaptiveTopicStats.value = TopicHistoryStore.getAdaptiveStats(context)
         promptStyleScores.value = PromptStyleStatsStore.getScoreMap(context)
@@ -264,6 +266,18 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
             text = "Self-check issues: ${selfCheckIssues.value}",
             style = MaterialTheme.typography.bodyMedium
         )
+        Text(
+            text = "M12 stats: total=${m12Stats.value.totalGenerations} ok=${m12Stats.value.okWithoutRewrite} rewriteUsed=${m12Stats.value.rewritesUsed} skip=${m12Stats.value.skippedAfterSelfCheck}",
+            style = MaterialTheme.typography.bodySmall
+        )
+        Button(
+            onClick = {
+                SchedulerPrefs.resetM12Stats(context)
+                refreshStatus()
+            }
+        ) {
+            Text("Reset M12 Stats")
+        }
         Spacer(modifier = Modifier.height(4.dp))
         Text(
             text = "Adaptive Topic Stats",
