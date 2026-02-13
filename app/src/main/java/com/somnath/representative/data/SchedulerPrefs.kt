@@ -2,7 +2,10 @@ package com.somnath.representative.data
 
 import android.content.Context
 import com.somnath.representative.BuildConfig
+import org.json.JSONArray
+import org.json.JSONObject
 import java.time.LocalDate
+import kotlin.math.min
 
 private const val PREFS_NAME = "somnath_rep_prefs"
 
@@ -18,6 +21,17 @@ object SchedulerPrefs {
     private const val KEY_ENABLE_DEBUG_TOOLS = "enable_debug_tools"
     private const val KEY_TOPIC_QUERY = "topicQuery"
     private const val KEY_AUTONOMOUS_MODE_ENABLED = "autonomousModeEnabled"
+    private const val KEY_EMERGENCY_STOP_ENABLED = "emergencyStopEnabled"
+    private const val KEY_CONSECUTIVE_POST_FAILURES = "consecutivePostFailures"
+    private const val KEY_NEXT_AUTO_POST_ALLOWED_AT = "nextAutoPostAllowedAt"
+    private const val KEY_AUDIT_EVENTS_JSON = "auditEventsJson"
+    private const val MAX_AUDIT_EVENTS = 10
+
+    data class AuditEvent(
+        val timestamp: Long,
+        val eventType: String,
+        val shortMessage: String
+    )
 
     data class HomeStatus(
         val schedulerEnabled: Boolean,
@@ -72,6 +86,85 @@ object SchedulerPrefs {
 
     fun setAutonomousModeEnabled(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_AUTONOMOUS_MODE_ENABLED, enabled).apply()
+    }
+
+    fun isEmergencyStopEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_EMERGENCY_STOP_ENABLED, false)
+
+    fun setEmergencyStopEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_EMERGENCY_STOP_ENABLED, enabled).apply()
+    }
+
+    fun getConsecutivePostFailures(context: Context): Int =
+        prefs(context).getInt(KEY_CONSECUTIVE_POST_FAILURES, 0)
+
+    fun getNextAutoPostAllowedAt(context: Context): Long =
+        prefs(context).getLong(KEY_NEXT_AUTO_POST_ALLOWED_AT, 0L)
+
+    fun isAutoPostInCooldown(context: Context, now: Long = System.currentTimeMillis()): Boolean {
+        val nextAllowedAt = getNextAutoPostAllowedAt(context)
+        return nextAllowedAt > 0L && now < nextAllowedAt
+    }
+
+    fun recordAutoPostFailure(context: Context, now: Long = System.currentTimeMillis()) {
+        val nextFailures = getConsecutivePostFailures(context) + 1
+        val delayMillis = min(6L * 60L * 60L * 1000L, (30L * 60L * 1000L) * (1L shl nextFailures))
+        prefs(context).edit()
+            .putInt(KEY_CONSECUTIVE_POST_FAILURES, nextFailures)
+            .putLong(KEY_NEXT_AUTO_POST_ALLOWED_AT, now + delayMillis)
+            .apply()
+    }
+
+    fun recordAutoPostSuccess(context: Context) {
+        prefs(context).edit()
+            .putInt(KEY_CONSECUTIVE_POST_FAILURES, 0)
+            .remove(KEY_NEXT_AUTO_POST_ALLOWED_AT)
+            .apply()
+    }
+
+    fun recordAuditEvent(
+        context: Context,
+        eventType: String,
+        shortMessage: String,
+        timestamp: Long = System.currentTimeMillis()
+    ) {
+        val pref = prefs(context)
+        val existing = pref.getString(KEY_AUDIT_EVENTS_JSON, null)
+        val jsonArray = runCatching { JSONArray(existing ?: "[]") }.getOrDefault(JSONArray())
+
+        val eventJson = JSONObject()
+            .put("timestamp", timestamp)
+            .put("eventType", eventType)
+            .put("shortMessage", shortMessage.take(120))
+
+        jsonArray.put(eventJson)
+
+        val trimmed = JSONArray()
+        val start = maxOf(0, jsonArray.length() - MAX_AUDIT_EVENTS)
+        for (index in start until jsonArray.length()) {
+            trimmed.put(jsonArray.getJSONObject(index))
+        }
+
+        pref.edit().putString(KEY_AUDIT_EVENTS_JSON, trimmed.toString()).apply()
+    }
+
+    fun getRecentAuditEvents(context: Context, limit: Int = 3): List<AuditEvent> {
+        val existing = prefs(context).getString(KEY_AUDIT_EVENTS_JSON, null)
+        val jsonArray = runCatching { JSONArray(existing ?: "[]") }.getOrDefault(JSONArray())
+        val events = mutableListOf<AuditEvent>()
+
+        for (index in 0 until jsonArray.length()) {
+            val item = jsonArray.getJSONObject(index)
+            events.add(
+                AuditEvent(
+                    timestamp = item.optLong("timestamp", 0L),
+                    eventType = item.optString("eventType", "UNKNOWN"),
+                    shortMessage = item.optString("shortMessage", "")
+                )
+            )
+        }
+
+        return events.takeLast(limit).reversed()
     }
 
     fun incrementErrors(context: Context) {

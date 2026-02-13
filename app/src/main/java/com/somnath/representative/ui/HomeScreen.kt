@@ -71,7 +71,10 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
 
     val homeStatus = remember { mutableStateOf(SchedulerPrefs.getHomeStatus(context)) }
     val autonomousModeEnabled = remember { mutableStateOf(SchedulerPrefs.isAutonomousModeEnabled(context)) }
+    val emergencyStopEnabled = remember { mutableStateOf(SchedulerPrefs.isEmergencyStopEnabled(context)) }
     val autonomousRateStatus = remember { mutableStateOf(AutonomousPostRateLimiter.getStatus(context)) }
+    val nextAutoPostAllowedAt = remember { mutableStateOf(SchedulerPrefs.getNextAutoPostAllowedAt(context)) }
+    val auditEvents = remember { mutableStateOf(SchedulerPrefs.getRecentAuditEvents(context, limit = 3)) }
     val lastGeneratedCandidate = remember { mutableStateOf(LastGeneratedCandidateStore.get()) }
     val submolts = remember { SubmoltConfigLoader().load(context) }
     val rssFeedLoader = remember { RssFeedConfigLoader() }
@@ -113,7 +116,10 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
     fun refreshStatus() {
         homeStatus.value = SchedulerPrefs.getHomeStatus(context)
         autonomousModeEnabled.value = SchedulerPrefs.isAutonomousModeEnabled(context)
+        emergencyStopEnabled.value = SchedulerPrefs.isEmergencyStopEnabled(context)
         autonomousRateStatus.value = AutonomousPostRateLimiter.getStatus(context)
+        nextAutoPostAllowedAt.value = SchedulerPrefs.getNextAutoPostAllowedAt(context)
+        auditEvents.value = SchedulerPrefs.getRecentAuditEvents(context, limit = 3)
         lastGeneratedCandidate.value = LastGeneratedCandidateStore.get()
     }
 
@@ -180,6 +186,10 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
             style = MaterialTheme.typography.bodyLarge
         )
         Text(
+            text = "Emergency Stop: ${if (emergencyStopEnabled.value) "ON" else "OFF"}",
+            style = MaterialTheme.typography.bodyLarge
+        )
+        Text(
             text = "Posts last 24h: ${autonomousRateStatus.value.postsLast24h}",
             style = MaterialTheme.typography.bodyLarge
         )
@@ -191,6 +201,15 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
         }
         Text(
             text = "Next allowed post: $nextAllowedLabel",
+            style = MaterialTheme.typography.bodyLarge
+        )
+        val cooldownLabel = if (nextAutoPostAllowedAt.value > System.currentTimeMillis()) {
+            DateFormat.format("yyyy-MM-dd HH:mm", Date(nextAutoPostAllowedAt.value)).toString()
+        } else {
+            "Ready"
+        }
+        Text(
+            text = "Cooldown until: $cooldownLabel",
             style = MaterialTheme.typography.bodyLarge
         )
         Text(
@@ -223,16 +242,38 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
             )
         }
         Text(
-            text = if (autonomousModeEnabled.value) {
+            text = if (emergencyStopEnabled.value) {
+                "Posting disabled by Emergency Stop"
+            } else if (autonomousModeEnabled.value) {
                 "Safe autonomous mode enabled. Auto-post guarded by limits."
             } else {
                 "Manual only. Will not auto-post."
             },
             style = MaterialTheme.typography.bodySmall
         )
+
+        Text(
+            text = "Recent audit events",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold
+        )
+        auditEvents.value.forEach { event ->
+            val timestampLabel = DateFormat.format("MM-dd HH:mm", Date(event.timestamp)).toString()
+            Text(
+                text = "$timestampLabel • ${event.shortMessage}",
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
         Button(
             onClick = {
                 coroutineScope.launch {
+                    if (SchedulerPrefs.isEmergencyStopEnabled(context)) {
+                        SchedulerPrefs.recordAuditEvent(context, "MANUAL_POST_BLOCKED_STOP", "Emergency stop")
+                        m3Status = "Posting disabled by Emergency Stop"
+                        refreshStatus()
+                        return@launch
+                    }
+
                     val apiKey = apiKeyStore.getApiKey()
                     if (apiKey.isNullOrBlank()) {
                         m3Status = "Set API key in Settings"
@@ -296,6 +337,7 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
                         onSuccess = {
                             tinyCacheGate.registerPostedFingerprint(localGate.finalFingerprint, type = "comment")
                             tinyCacheCount = tinyCacheStore.getRecentFingerprints().size
+                            SchedulerPrefs.recordAuditEvent(context, "MANUAL_POST_SUCCESS", "Posted")
                             "Posted successfully"
                         },
                         onFailure = {
@@ -373,6 +415,13 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
         Button(
             onClick = {
                 coroutineScope.launch {
+                    if (SchedulerPrefs.isEmergencyStopEnabled(context)) {
+                        SchedulerPrefs.recordAuditEvent(context, "MANUAL_POST_BLOCKED_STOP", "Emergency stop")
+                        m3Status = "Posting disabled by Emergency Stop"
+                        refreshStatus()
+                        return@launch
+                    }
+
                     if (fetchedPosts.isEmpty()) {
                         m3Status = "Fetch feed first so a post is available for commenting."
                         return@launch
@@ -457,6 +506,7 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
                             } else {
                                 ""
                             }
+                            SchedulerPrefs.recordAuditEvent(context, "MANUAL_POST_SUCCESS", "Posted")
                             "Post comment succeeded on post: $targetPostId$gateSuffix"
                         },
                         onFailure = { it.message ?: "Post comment failed" }
@@ -472,6 +522,13 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
         Button(
             onClick = {
                 coroutineScope.launch {
+                    if (SchedulerPrefs.isEmergencyStopEnabled(context)) {
+                        SchedulerPrefs.recordAuditEvent(context, "MANUAL_POST_BLOCKED_STOP", "Emergency stop")
+                        m3Status = "Posting disabled by Emergency Stop"
+                        refreshStatus()
+                        return@launch
+                    }
+
                     val postId = pendingManualPostId
                     val draft = pendingManualPostDraft
                     if (postId.isNullOrBlank() || draft.isNullOrBlank()) {
@@ -484,6 +541,7 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
                         onSuccess = {
                             pendingManualPostDraft = null
                             pendingManualPostId = null
+                            SchedulerPrefs.recordAuditEvent(context, "MANUAL_POST_SUCCESS", "Posted")
                             "Post Anyway succeeded on post: $postId"
                         },
                         onFailure = { it.message ?: "Post Anyway failed" }

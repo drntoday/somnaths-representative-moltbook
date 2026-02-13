@@ -34,6 +34,7 @@ class SomnathRepWorker(
     override suspend fun doWork(): Result {
         return try {
             SchedulerPrefs.updateLastActionMessage(applicationContext, "Generating")
+            SchedulerPrefs.recordAuditEvent(applicationContext, "WORKER_RAN", "Worker ran")
 
             val topic = SchedulerPrefs.getTopicQuery(applicationContext).ifBlank { DEFAULT_TOPIC }
 
@@ -61,6 +62,7 @@ class SomnathRepWorker(
 
             if (safetyResult.decision == SafetyDecision.SKIP) {
                 LastGeneratedCandidateStore.clear()
+                SchedulerPrefs.recordAuditEvent(applicationContext, "SKIPPED_SAFETY", safetyResult.reason.take(80))
                 SchedulerPrefs.recordScheduledCycle(applicationContext, "Skipped: ${safetyResult.reason}")
                 return Result.success()
             }
@@ -72,6 +74,7 @@ class SomnathRepWorker(
             val localGate = tinyCacheGate.evaluateCommentDraft(safetyResult.finalText)
             if (localGate.decision.status == GateStatus.SKIP) {
                 LastGeneratedCandidateStore.clear()
+                SchedulerPrefs.recordAuditEvent(applicationContext, "SKIPPED_DUPLICATE", "Duplicate")
                 SchedulerPrefs.recordScheduledCycle(applicationContext, "Skipped duplicate")
                 return Result.success()
             }
@@ -80,6 +83,13 @@ class SomnathRepWorker(
                 candidateText = localGate.finalDraftText,
                 candidateTopic = topic
             )
+            SchedulerPrefs.recordAuditEvent(applicationContext, "GENERATED", "Draft generated")
+
+            if (SchedulerPrefs.isEmergencyStopEnabled(applicationContext)) {
+                SchedulerPrefs.recordAuditEvent(applicationContext, "SKIPPED_SAFETY", "Emergency stop")
+                SchedulerPrefs.recordScheduledCycle(applicationContext, "Posting disabled by Emergency Stop")
+                return Result.success()
+            }
 
             if (!SchedulerPrefs.isAutonomousModeEnabled(applicationContext)) {
                 SchedulerPrefs.recordScheduledCycle(applicationContext, "Generated candidate successfully")
@@ -91,7 +101,14 @@ class SomnathRepWorker(
                 return Result.success()
             }
 
+            if (SchedulerPrefs.isAutoPostInCooldown(applicationContext)) {
+                SchedulerPrefs.recordAuditEvent(applicationContext, "SKIPPED_RATE_LIMIT", "Cooldown")
+                SchedulerPrefs.recordScheduledCycle(applicationContext, "Auto-post cooldown active")
+                return Result.success()
+            }
+
             if (!AutonomousPostRateLimiter.canPostNow(applicationContext)) {
+                SchedulerPrefs.recordAuditEvent(applicationContext, "SKIPPED_RATE_LIMIT", "Rate limit")
                 SchedulerPrefs.recordScheduledCycle(applicationContext, "Rate limit reached")
                 return Result.success()
             }
@@ -118,9 +135,13 @@ class SomnathRepWorker(
                 onSuccess = {
                     tinyCacheGate.registerPostedFingerprint(localGate.finalFingerprint, type = "comment")
                     AutonomousPostRateLimiter.recordSuccessfulPost(applicationContext)
+                    SchedulerPrefs.recordAutoPostSuccess(applicationContext)
+                    SchedulerPrefs.recordAuditEvent(applicationContext, "AUTO_POST_SUCCESS", "Posted")
                     SchedulerPrefs.recordScheduledCycle(applicationContext, "Auto-posted successfully")
                 },
                 onFailure = {
+                    SchedulerPrefs.recordAutoPostFailure(applicationContext)
+                    SchedulerPrefs.recordAuditEvent(applicationContext, "AUTO_POST_FAIL", (it.message ?: "Auto-post failed").take(80))
                     SchedulerPrefs.recordScheduledCycle(applicationContext, "Auto-post failed")
                 }
             )
