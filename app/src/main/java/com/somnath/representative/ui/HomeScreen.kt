@@ -81,6 +81,8 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
     val nextRunDelayMinutes = remember { mutableStateOf(SchedulerPrefs.getDisplayedNextRunDelayMinutes(context)) }
     val nextAutoPostAllowedAt = remember { mutableStateOf(SchedulerPrefs.getNextAutoPostAllowedAt(context)) }
     val auditEvents = remember { mutableStateOf(SchedulerPrefs.getRecentAuditEvents(context, limit = 3)) }
+    val selfCheckStatus = remember { mutableStateOf(SchedulerPrefs.getSelfCheckStatus(context)) }
+    val selfCheckIssues = remember { mutableStateOf(SchedulerPrefs.getSelfCheckIssues(context)) }
     val lastGeneratedCandidate = remember { mutableStateOf(LastGeneratedCandidateStore.get()) }
     val adaptiveTopicStats = remember { mutableStateOf(TopicHistoryStore.getAdaptiveStats(context)) }
     val promptStyleScores = remember { mutableStateOf(PromptStyleStatsStore.getScoreMap(context)) }
@@ -131,6 +133,8 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
         nextRunDelayMinutes.value = SchedulerPrefs.getDisplayedNextRunDelayMinutes(context)
         nextAutoPostAllowedAt.value = SchedulerPrefs.getNextAutoPostAllowedAt(context)
         auditEvents.value = SchedulerPrefs.getRecentAuditEvents(context, limit = 3)
+        selfCheckStatus.value = SchedulerPrefs.getSelfCheckStatus(context)
+        selfCheckIssues.value = SchedulerPrefs.getSelfCheckIssues(context)
         lastGeneratedCandidate.value = LastGeneratedCandidateStore.get()
         adaptiveTopicStats.value = TopicHistoryStore.getAdaptiveStats(context)
         promptStyleScores.value = PromptStyleStatsStore.getScoreMap(context)
@@ -249,7 +253,15 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
             style = MaterialTheme.typography.bodyLarge
         )
         Text(
-            text = "Last pipeline: RSS+FactPack -> Safety -> DupGate -> Generated/Skipped",
+            text = "Last pipeline: RSS+FactPack -> Safety+Confidence -> Self-check -> Rewrite? -> DupGate",
+            style = MaterialTheme.typography.bodyMedium
+        )
+        Text(
+            text = "Self-check: ${selfCheckStatus.value}",
+            style = MaterialTheme.typography.bodyMedium
+        )
+        Text(
+            text = "Self-check issues: ${selfCheckIssues.value}",
             style = MaterialTheme.typography.bodyMedium
         )
         Spacer(modifier = Modifier.height(4.dp))
