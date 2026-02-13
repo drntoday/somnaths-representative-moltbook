@@ -34,6 +34,7 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import com.somnath.representative.BuildConfig
 import com.somnath.representative.data.ApiKeyStore
+import com.somnath.representative.data.AutonomousPostRateLimiter
 import com.somnath.representative.data.LastGeneratedCandidateStore
 import com.somnath.representative.data.RssFeedConfigLoader
 import com.somnath.representative.data.SchedulerPrefs
@@ -69,6 +70,8 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
     val coroutineScope = rememberCoroutineScope()
 
     val homeStatus = remember { mutableStateOf(SchedulerPrefs.getHomeStatus(context)) }
+    val autonomousModeEnabled = remember { mutableStateOf(SchedulerPrefs.isAutonomousModeEnabled(context)) }
+    val autonomousRateStatus = remember { mutableStateOf(AutonomousPostRateLimiter.getStatus(context)) }
     val lastGeneratedCandidate = remember { mutableStateOf(LastGeneratedCandidateStore.get()) }
     val submolts = remember { SubmoltConfigLoader().load(context) }
     val rssFeedLoader = remember { RssFeedConfigLoader() }
@@ -109,6 +112,8 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
 
     fun refreshStatus() {
         homeStatus.value = SchedulerPrefs.getHomeStatus(context)
+        autonomousModeEnabled.value = SchedulerPrefs.isAutonomousModeEnabled(context)
+        autonomousRateStatus.value = AutonomousPostRateLimiter.getStatus(context)
         lastGeneratedCandidate.value = LastGeneratedCandidateStore.get()
     }
 
@@ -171,6 +176,24 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
         )
         Text(text = "Errors: ${homeStatus.value.errorsCount}", style = MaterialTheme.typography.bodyLarge)
         Text(
+            text = "Autonomous Mode: ${if (autonomousModeEnabled.value) "ON" else "OFF"}",
+            style = MaterialTheme.typography.bodyLarge
+        )
+        Text(
+            text = "Posts last 24h: ${autonomousRateStatus.value.postsLast24h}",
+            style = MaterialTheme.typography.bodyLarge
+        )
+        val nextAllowedPost = autonomousRateStatus.value.nextAllowedPostAt
+        val nextAllowedLabel = if (autonomousRateStatus.value.canPostNow || nextAllowedPost <= 0L) {
+            "Ready"
+        } else {
+            DateFormat.format("yyyy-MM-dd HH:mm", Date(nextAllowedPost)).toString()
+        }
+        Text(
+            text = "Next allowed post: $nextAllowedLabel",
+            style = MaterialTheme.typography.bodyLarge
+        )
+        Text(
             text = "Last pipeline: RSS+FactPack -> Safety -> DupGate -> Generated/Skipped",
             style = MaterialTheme.typography.bodyMedium
         )
@@ -200,7 +223,11 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
             )
         }
         Text(
-            text = "Manual only. Will not auto-post.",
+            text = if (autonomousModeEnabled.value) {
+                "Safe autonomous mode enabled. Auto-post guarded by limits."
+            } else {
+                "Manual only. Will not auto-post."
+            },
             style = MaterialTheme.typography.bodySmall
         )
         Button(
