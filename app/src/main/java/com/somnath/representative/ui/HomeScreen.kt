@@ -83,6 +83,7 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
     val auditEvents = remember { mutableStateOf(SchedulerPrefs.getRecentAuditEvents(context, limit = 3)) }
     val selfCheckStatus = remember { mutableStateOf(SchedulerPrefs.getSelfCheckStatus(context)) }
     val selfCheckIssues = remember { mutableStateOf(SchedulerPrefs.getSelfCheckIssues(context)) }
+    val autoPostEligibility = remember { mutableStateOf(SchedulerPrefs.getAutoPostEligibilitySummary(context)) }
     val m12Stats = remember { mutableStateOf(SchedulerPrefs.getM12Stats(context)) }
     val lastGeneratedCandidate = remember { mutableStateOf(LastGeneratedCandidateStore.get()) }
     val adaptiveTopicStats = remember { mutableStateOf(TopicHistoryStore.getAdaptiveStats(context)) }
@@ -136,6 +137,7 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
         auditEvents.value = SchedulerPrefs.getRecentAuditEvents(context, limit = 3)
         selfCheckStatus.value = SchedulerPrefs.getSelfCheckStatus(context)
         selfCheckIssues.value = SchedulerPrefs.getSelfCheckIssues(context)
+        autoPostEligibility.value = SchedulerPrefs.getAutoPostEligibilitySummary(context)
         m12Stats.value = SchedulerPrefs.getM12Stats(context)
         lastGeneratedCandidate.value = LastGeneratedCandidateStore.get()
         adaptiveTopicStats.value = TopicHistoryStore.getAdaptiveStats(context)
@@ -229,6 +231,10 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
         )
         Text(
             text = "Emergency Stop: ${if (emergencyStopEnabled.value) "ON" else "OFF"}",
+            style = MaterialTheme.typography.bodyLarge
+        )
+        Text(
+            text = "Auto-post eligibility: ${autoPostEligibility.value}",
             style = MaterialTheme.typography.bodyLarge
         )
         Text(
