@@ -19,6 +19,18 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Download ONNX Runtime GenAI AAR
+        shell: bash
+        run: |
+          set -e
+          mkdir -p app/local-libs
+          echo "Downloading GenAI AAR..."
+          curl -L --fail -o app/local-libs/onnxruntime-genai-android.aar \
+            https://github.com/microsoft/onnxruntime-genai/releases/download/v0.6.0/onnxruntime-genai-android-0.6.0.aar
+          echo "Downloaded files:"
+          ls -lah app/local-libs
+          test -f app/local-libs/onnxruntime-genai-android.aar
+
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
 
