@@ -118,6 +118,13 @@ class SomnathRepWorker(
                 return Result.success()
             }
 
+            val postableTopic = TopicHistoryStore.choosePostableTopic(applicationContext, topic)
+            if (postableTopic == null || postableTopic != topic) {
+                SchedulerPrefs.recordAuditEvent(applicationContext, "SKIPPED_RATE_LIMIT", "Topic cooldown active")
+                SchedulerPrefs.recordScheduledCycle(applicationContext, "Auto-post skipped: topic cooldown active")
+                return Result.success()
+            }
+
             if (!AutonomousPostRateLimiter.canPostNow(applicationContext)) {
                 SchedulerPrefs.recordAuditEvent(applicationContext, "SKIPPED_RATE_LIMIT", "Rate limit")
                 SchedulerPrefs.recordScheduledCycle(applicationContext, "Rate limit reached")
@@ -146,6 +153,7 @@ class SomnathRepWorker(
                     tinyCacheGate.registerPostedFingerprint(localGate.finalFingerprint, type = "comment")
                     AutonomousPostRateLimiter.recordSuccessfulPost(applicationContext)
                     SchedulerPrefs.recordAutoPostSuccess(applicationContext)
+                    TopicHistoryStore.recordTopicPosted(applicationContext, topic)
                     TopicHistoryStore.applyScoreDelta(applicationContext, topic, delta = 2)
                     SchedulerPrefs.recordAuditEvent(applicationContext, "AUTO_POST_SUCCESS", "Posted")
                     SchedulerPrefs.recordScheduledCycle(applicationContext, "Auto-posted successfully")

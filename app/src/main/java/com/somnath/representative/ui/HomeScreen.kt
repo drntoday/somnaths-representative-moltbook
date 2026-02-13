@@ -151,6 +151,12 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
 
     val hasSubmolts = submolts.isNotEmpty()
     val debugToolsEnabled = BuildConfig.DEBUG && SchedulerPrefs.isDebugToolsEnabled(context)
+    val nextTopicCandidate = TopicHistoryStore.selectAdaptiveTopic(
+        context = context,
+        defaultTopic = SchedulerPrefs.getTopicQuery(context).ifBlank { "latest android ai release" },
+        explorationPool = submolts
+    )
+    val topicCooldownActive = TopicHistoryStore.isTopicPostCooldownActive(context, nextTopicCandidate)
 
     Column(
         modifier = Modifier
@@ -171,6 +177,14 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
         )
         Text(
             text = "Last action: $lastAction",
+            style = MaterialTheme.typography.bodyLarge
+        )
+        Text(
+            text = "Next topic candidate: $nextTopicCandidate",
+            style = MaterialTheme.typography.bodyLarge
+        )
+        Text(
+            text = "Topic cooldown active: ${if (topicCooldownActive) "Yes" else "No"}",
             style = MaterialTheme.typography.bodyLarge
         )
         if (homeStatus.value.lastActionMessage.isNotBlank()) {
@@ -309,6 +323,11 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
                         return@launch
                     }
 
+                    if (TopicHistoryStore.isTopicPostCooldownActive(context, candidateSnapshot.candidateTopic)) {
+                        m3Status = "Skipped: topic cooldown active"
+                        return@launch
+                    }
+
                     if (!hasSubmolts) {
                         m3Status = "No submolts configured"
                         return@launch
@@ -360,6 +379,7 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
                         onSuccess = {
                             tinyCacheGate.registerPostedFingerprint(localGate.finalFingerprint, type = "comment")
                             tinyCacheCount = tinyCacheStore.getRecentFingerprints().size
+                            TopicHistoryStore.recordTopicPosted(context, candidateSnapshot.candidateTopic)
                             TopicHistoryStore.applyScoreDelta(context, candidateSnapshot.candidateTopic, delta = 2)
                             SchedulerPrefs.recordAuditEvent(context, "MANUAL_POST_SUCCESS", "Posted")
                             refreshStatus()
