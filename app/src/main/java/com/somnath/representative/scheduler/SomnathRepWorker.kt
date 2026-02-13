@@ -8,6 +8,7 @@ import com.somnath.representative.ai.PhiRuntime
 import com.somnath.representative.data.ApiKeyStore
 import com.somnath.representative.data.AutonomousPostRateLimiter
 import com.somnath.representative.data.LastGeneratedCandidateStore
+import com.somnath.representative.data.PromptStyleStatsStore
 import com.somnath.representative.data.RssFeedConfigLoader
 import com.somnath.representative.data.SchedulerPrefs
 import com.somnath.representative.data.SubmoltConfigLoader
@@ -59,7 +60,9 @@ class SomnathRepWorker(
                 searchResults = emptyList()
             )
 
-            val prompt = buildPrompt(topic, factPack)
+            val selectedStyle = PromptStyleStatsStore.selectStyle(applicationContext)
+            PromptStyleStatsStore.recordStyleUsed(applicationContext, selectedStyle)
+            val prompt = buildPrompt(style = selectedStyle, topic = topic, factPack = factPack)
             val generatedCandidate = PhiInferenceEngine(applicationContext).generate(prompt).trim()
 
             val safetyResult = SafetyGuard().evaluate(
@@ -70,11 +73,13 @@ class SomnathRepWorker(
 
             if (safetyResult.decision == SafetyDecision.SKIP) {
                 LastGeneratedCandidateStore.clear()
+                PromptStyleStatsStore.applyScoreDelta(applicationContext, selectedStyle, delta = -2)
                 TopicHistoryStore.applyScoreDelta(applicationContext, topic, delta = -2)
                 SchedulerPrefs.recordAuditEvent(applicationContext, "SKIPPED_SAFETY", safetyResult.reason.take(80))
                 SchedulerPrefs.recordScheduledCycle(applicationContext, "Skipped: ${safetyResult.reason}")
                 return Result.success()
             }
+            PromptStyleStatsStore.applyScoreDelta(applicationContext, selectedStyle, delta = 1)
             TopicHistoryStore.applyScoreDelta(applicationContext, topic, delta = 1)
 
             val tinyCacheGate = LocalTinyCacheGate(
@@ -84,6 +89,7 @@ class SomnathRepWorker(
             val localGate = tinyCacheGate.evaluateCommentDraft(safetyResult.finalText)
             if (localGate.decision.status == GateStatus.SKIP) {
                 LastGeneratedCandidateStore.clear()
+                PromptStyleStatsStore.applyScoreDelta(applicationContext, selectedStyle, delta = -1)
                 TopicHistoryStore.applyScoreDelta(applicationContext, topic, delta = -1)
                 SchedulerPrefs.recordAuditEvent(applicationContext, "SKIPPED_DUPLICATE", "Duplicate")
                 SchedulerPrefs.recordScheduledCycle(applicationContext, "Skipped duplicate")
@@ -92,7 +98,8 @@ class SomnathRepWorker(
 
             LastGeneratedCandidateStore.set(
                 candidateText = localGate.finalDraftText,
-                candidateTopic = topic
+                candidateTopic = topic,
+                candidateStyle = selectedStyle
             )
             SchedulerPrefs.recordAuditEvent(applicationContext, "GENERATED", "Draft generated")
 
@@ -154,12 +161,14 @@ class SomnathRepWorker(
                     AutonomousPostRateLimiter.recordSuccessfulPost(applicationContext)
                     SchedulerPrefs.recordAutoPostSuccess(applicationContext)
                     TopicHistoryStore.recordTopicPosted(applicationContext, topic)
+                    PromptStyleStatsStore.applyScoreDelta(applicationContext, selectedStyle, delta = 2)
                     TopicHistoryStore.applyScoreDelta(applicationContext, topic, delta = 2)
                     SchedulerPrefs.recordAuditEvent(applicationContext, "AUTO_POST_SUCCESS", "Posted")
                     SchedulerPrefs.recordScheduledCycle(applicationContext, "Auto-posted successfully")
                 },
                 onFailure = {
                     SchedulerPrefs.recordAutoPostFailure(applicationContext)
+                    PromptStyleStatsStore.applyScoreDelta(applicationContext, selectedStyle, delta = -3)
                     TopicHistoryStore.applyScoreDelta(applicationContext, topic, delta = -3)
                     SchedulerPrefs.recordAuditEvent(applicationContext, "AUTO_POST_FAIL", (it.message ?: "Auto-post failed").take(80))
                     SchedulerPrefs.recordScheduledCycle(applicationContext, "Auto-post failed")
@@ -177,15 +186,24 @@ class SomnathRepWorker(
         }
     }
 
-    private fun buildPrompt(topic: String, factPack: FactPack): String {
-        val bullets = factPack.bullets.take(5).joinToString("\n") { "- $it" }
+    private fun buildPrompt(style: PromptStyle, topic: String, factPack: FactPack?): String {
+        val factBullets = factPack?.bullets.orEmpty().take(3)
+        val styleInstruction = when (style) {
+            PromptStyle.FRIENDLY -> "Write a warm, supportive reply in 60-90 words. Include at most one question."
+            PromptStyle.ANALYTICAL -> "Write a structured reply in 60-90 words with at most two short bullets."
+            PromptStyle.MINIMAL -> "Write a single-paragraph reply in 40-60 words."
+            PromptStyle.INSIGHTFUL -> "Write a 60-90 word reply with one memorable insight and no bullets."
+        }
+
         return buildString {
+            appendLine("Style: ${style.name}")
             appendLine("Topic: $topic")
-            if (bullets.isNotBlank()) {
-                appendLine("FactPack:")
-                appendLine(bullets)
+            if (factBullets.isNotEmpty()) {
+                appendLine("FactPack (up to 3 points):")
+                factBullets.forEach { appendLine("- $it") }
             }
-            append("Write a calm, helpful comment under 80 words. No links. No quotes.")
+            appendLine("No links. No quotes. Calm tone.")
+            append(styleInstruction)
         }
     }
 }

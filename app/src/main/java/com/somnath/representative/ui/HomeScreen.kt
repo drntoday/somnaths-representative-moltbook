@@ -36,6 +36,7 @@ import com.somnath.representative.BuildConfig
 import com.somnath.representative.data.ApiKeyStore
 import com.somnath.representative.data.AutonomousPostRateLimiter
 import com.somnath.representative.data.LastGeneratedCandidateStore
+import com.somnath.representative.data.PromptStyleStatsStore
 import com.somnath.representative.data.RssFeedConfigLoader
 import com.somnath.representative.data.SchedulerPrefs
 import com.somnath.representative.data.SubmoltConfigLoader
@@ -53,6 +54,7 @@ import com.somnath.representative.moltbook.OkHttpMoltbookApi
 import com.somnath.representative.moltbook.PostSummary
 import com.somnath.representative.rss.RssFetcher
 import com.somnath.representative.rss.RssItem
+import com.somnath.representative.scheduler.PromptStyle
 import com.somnath.representative.safety.SafetyDecision
 import com.somnath.representative.safety.SafetyGuard
 import com.somnath.representative.search.SearchProviderConfigLoader
@@ -78,6 +80,8 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
     val auditEvents = remember { mutableStateOf(SchedulerPrefs.getRecentAuditEvents(context, limit = 3)) }
     val lastGeneratedCandidate = remember { mutableStateOf(LastGeneratedCandidateStore.get()) }
     val adaptiveTopicStats = remember { mutableStateOf(TopicHistoryStore.getAdaptiveStats(context)) }
+    val promptStyleScores = remember { mutableStateOf(PromptStyleStatsStore.getScoreMap(context)) }
+    val topPromptStyle = remember { mutableStateOf(PromptStyleStatsStore.getTopStyle(context)) }
     val submolts = remember { SubmoltConfigLoader().load(context) }
     val rssFeedLoader = remember { RssFeedConfigLoader() }
     val searchProviderConfigLoader = remember { SearchProviderConfigLoader() }
@@ -124,6 +128,8 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
         auditEvents.value = SchedulerPrefs.getRecentAuditEvents(context, limit = 3)
         lastGeneratedCandidate.value = LastGeneratedCandidateStore.get()
         adaptiveTopicStats.value = TopicHistoryStore.getAdaptiveStats(context)
+        promptStyleScores.value = PromptStyleStatsStore.getScoreMap(context)
+        topPromptStyle.value = PromptStyleStatsStore.getTopStyle(context)
     }
 
     LaunchedEffect(Unit) {
@@ -253,6 +259,21 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
             text = "Last topic used: $lastTopicLabel",
             style = MaterialTheme.typography.bodyMedium
         )
+        val candidateStyleLabel = lastGeneratedCandidate.value?.candidateStyle?.name ?: "—"
+        val topStyleLabel = topPromptStyle.value?.let { "${it.style.name} (${it.score})" } ?: "—"
+        val scoreMap = promptStyleScores.value
+        Text(
+            text = "Prompt style used: $candidateStyleLabel",
+            style = MaterialTheme.typography.bodyMedium
+        )
+        Text(
+            text = "Top style: $topStyleLabel",
+            style = MaterialTheme.typography.bodyMedium
+        )
+        Text(
+            text = "Style stats: F=${scoreMap[PromptStyle.FRIENDLY] ?: 0} A=${scoreMap[PromptStyle.ANALYTICAL] ?: 0} M=${scoreMap[PromptStyle.MINIMAL] ?: 0} I=${scoreMap[PromptStyle.INSIGHTFUL] ?: 0}",
+            style = MaterialTheme.typography.bodySmall
+        )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
             text = "Last Generated Candidate",
@@ -364,13 +385,18 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
                     )
 
                     if (safetyResult.decision == SafetyDecision.SKIP || safetyResult.decision == SafetyDecision.ASK_QUESTION) {
+                        PromptStyleStatsStore.applyScoreDelta(context, candidateSnapshot.candidateStyle, delta = -2)
                         m3Status = "Skipped: ${safetyResult.reason}"
+                        refreshStatus()
                         return@launch
                     }
+                    PromptStyleStatsStore.applyScoreDelta(context, candidateSnapshot.candidateStyle, delta = 1)
 
                     val localGate = tinyCacheGate.evaluateCommentDraft(safetyResult.finalText)
                     if (localGate.decision.status == GateStatus.SKIP) {
+                        PromptStyleStatsStore.applyScoreDelta(context, candidateSnapshot.candidateStyle, delta = -1)
                         m3Status = "Skipped duplicate"
+                        refreshStatus()
                         return@launch
                     }
 
@@ -380,12 +406,14 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
                             tinyCacheGate.registerPostedFingerprint(localGate.finalFingerprint, type = "comment")
                             tinyCacheCount = tinyCacheStore.getRecentFingerprints().size
                             TopicHistoryStore.recordTopicPosted(context, candidateSnapshot.candidateTopic)
+                            PromptStyleStatsStore.applyScoreDelta(context, candidateSnapshot.candidateStyle, delta = 2)
                             TopicHistoryStore.applyScoreDelta(context, candidateSnapshot.candidateTopic, delta = 2)
                             SchedulerPrefs.recordAuditEvent(context, "MANUAL_POST_SUCCESS", "Posted")
                             refreshStatus()
                             "Posted successfully"
                         },
                         onFailure = {
+                            PromptStyleStatsStore.applyScoreDelta(context, candidateSnapshot.candidateStyle, delta = -3)
                             TopicHistoryStore.applyScoreDelta(context, candidateSnapshot.candidateTopic, delta = -3)
                             refreshStatus()
                             it.message ?: "Post failed"
