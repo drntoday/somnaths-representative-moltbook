@@ -3,19 +3,20 @@ package com.somnath.representative.data
 import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
-import kotlin.math.abs
 
 private const val PREFS_NAME = "somnath_rep_prefs"
 private const val KEY_TOPIC_HISTORY_JSON = "topicHistoryJson"
 private const val MAX_TOPIC_HISTORY = 20
 private const val MIN_TOPIC_SCORE = -10
 private const val MAX_TOPIC_SCORE = 10
+private const val TOPIC_POST_COOLDOWN_MS = 6 * 60 * 60 * 1000L
 
 data class TopicHistoryEntry(
     val topic: String,
     val score: Int,
     val lastUsedAt: Long,
-    val timesUsed: Int
+    val timesUsed: Int,
+    val lastPostedAt: Long
 )
 
 data class AdaptiveTopicStats(
@@ -26,10 +27,11 @@ data class AdaptiveTopicStats(
 
 object TopicHistoryStore {
     fun recordTopicUsed(context: Context, topic: String, usedAt: Long = System.currentTimeMillis()) {
-        if (topic.isBlank()) return
+        val normalizedTopic = TopicGuardrails.normalizeTopic(topic)
+        if (normalizedTopic.isBlank()) return
         updateEntry(context, topic) { existing ->
             if (existing == null) {
-                TopicHistoryEntry(topic = topic, score = 0, lastUsedAt = usedAt, timesUsed = 1)
+                TopicHistoryEntry(topic = normalizedTopic, score = 0, lastUsedAt = usedAt, timesUsed = 1, lastPostedAt = 0L)
             } else {
                 existing.copy(lastUsedAt = usedAt, timesUsed = existing.timesUsed + 1)
             }
@@ -37,16 +39,46 @@ object TopicHistoryStore {
     }
 
     fun applyScoreDelta(context: Context, topic: String, delta: Int, usedAt: Long = System.currentTimeMillis()) {
-        if (topic.isBlank()) return
+        val normalizedTopic = TopicGuardrails.normalizeTopic(topic)
+        if (normalizedTopic.isBlank()) return
         updateEntry(context, topic) { existing ->
             val currentScore = existing?.score ?: 0
             TopicHistoryEntry(
-                topic = topic,
-                score = (currentScore + delta).coerceIn(MIN_TOPIC_SCORE, MAX_TOPIC_SCORE),
+                topic = normalizedTopic,
+                score = TopicGuardrails.clampScore(
+                    normalizedTopic,
+                    (currentScore + delta).coerceIn(MIN_TOPIC_SCORE, MAX_TOPIC_SCORE)
+                ),
                 lastUsedAt = usedAt,
-                timesUsed = existing?.timesUsed ?: 1
+                timesUsed = existing?.timesUsed ?: 1,
+                lastPostedAt = existing?.lastPostedAt ?: 0L
             )
         }
+    }
+
+    fun recordTopicPosted(context: Context, topic: String, postedAt: Long = System.currentTimeMillis()) {
+        val normalizedTopic = TopicGuardrails.normalizeTopic(topic)
+        if (normalizedTopic.isBlank()) return
+        updateEntry(context, topic) { existing ->
+            if (existing == null) {
+                TopicHistoryEntry(
+                    topic = normalizedTopic,
+                    score = 0,
+                    lastUsedAt = postedAt,
+                    timesUsed = 1,
+                    lastPostedAt = postedAt
+                )
+            } else {
+                existing.copy(lastUsedAt = postedAt, lastPostedAt = postedAt)
+            }
+        }
+    }
+
+    fun isTopicPostCooldownActive(context: Context, topic: String, now: Long = System.currentTimeMillis()): Boolean {
+        val normalizedTopic = TopicGuardrails.normalizeTopic(topic)
+        if (normalizedTopic.isBlank()) return false
+        val entry = getEntries(context).firstOrNull { it.topic == normalizedTopic } ?: return false
+        return entry.lastPostedAt > 0L && (now - entry.lastPostedAt) < TOPIC_POST_COOLDOWN_MS
     }
 
     fun selectAdaptiveTopic(
@@ -56,16 +88,22 @@ object TopicHistoryStore {
         now: Long = System.currentTimeMillis()
     ): String {
         val history = getEntries(context)
-        if (history.isEmpty()) return defaultTopic
+        if (history.isEmpty()) return TopicGuardrails.normalizeTopic(defaultTopic)
 
-        val sortedByScore = history.sortedWith(compareByDescending<TopicHistoryEntry> { it.score }.thenByDescending { it.lastUsedAt })
-        val topTopic = sortedByScore.firstOrNull()?.topic ?: defaultTopic
-        val neutralTopic = history.minByOrNull { abs(it.score) }?.topic ?: topTopic
+        val safeHistory = history.filterNot { TopicGuardrails.isBlocked(it.topic) }
+        val prioritizedHistory = if (safeHistory.isNotEmpty()) safeHistory else history
+
+        val sortedByScore = prioritizedHistory.sortedWith(
+            compareByDescending<TopicHistoryEntry> { TopicGuardrails.clampScore(it.topic, it.score) }
+                .thenByDescending { it.lastUsedAt }
+        )
+        val topTopic = sortedByScore.firstOrNull()?.topic ?: TopicGuardrails.normalizeTopic(defaultTopic)
+        val neutralTopic = TopicGuardrails.evergreenTopics[(now % TopicGuardrails.evergreenTopics.size).toInt()]
         val explorationTopic = if (explorationPool.isNotEmpty()) {
             val index = (now % explorationPool.size).toInt()
-            explorationPool[index].replace("_", " ")
+            TopicGuardrails.normalizeTopic(explorationPool[index].replace("_", " "))
         } else {
-            "$defaultTopic update"
+            TopicGuardrails.normalizeTopic("$defaultTopic update")
         }
 
         val roll = (now % 100).toInt()
@@ -74,6 +112,22 @@ object TopicHistoryStore {
             roll < 90 -> neutralTopic
             else -> explorationTopic
         }
+    }
+
+    fun choosePostableTopic(context: Context, preferredTopic: String, now: Long = System.currentTimeMillis()): String? {
+        val normalizedPreferred = TopicGuardrails.normalizeTopic(preferredTopic)
+        val history = getEntries(context)
+        val preferredEntry = history.firstOrNull { it.topic == normalizedPreferred }
+        if (preferredEntry != null && !isTopicPostCooldownActive(context, preferredEntry.topic, now)) {
+            return preferredEntry.topic
+        }
+
+        return history
+            .asSequence()
+            .filterNot { TopicGuardrails.isBlocked(it.topic) }
+            .filterNot { isTopicPostCooldownActive(context, it.topic, now) }
+            .maxWithOrNull(compareBy<TopicHistoryEntry> { it.score }.thenBy { it.lastUsedAt })
+            ?.topic
     }
 
     fun getAdaptiveStats(context: Context): AdaptiveTopicStats {
@@ -93,14 +147,18 @@ object TopicHistoryStore {
         return buildList {
             for (index in 0 until jsonArray.length()) {
                 val item = jsonArray.optJSONObject(index) ?: continue
-                val topic = item.optString("topic", "").trim()
+                val topic = TopicGuardrails.normalizeTopic(item.optString("topic", ""))
                 if (topic.isBlank()) continue
                 add(
                     TopicHistoryEntry(
                         topic = topic,
-                        score = item.optInt("score", 0).coerceIn(MIN_TOPIC_SCORE, MAX_TOPIC_SCORE),
+                        score = TopicGuardrails.clampScore(
+                            topic,
+                            item.optInt("score", 0).coerceIn(MIN_TOPIC_SCORE, MAX_TOPIC_SCORE)
+                        ),
                         lastUsedAt = item.optLong("lastUsedAt", 0L),
-                        timesUsed = item.optInt("timesUsed", 1).coerceAtLeast(1)
+                        timesUsed = item.optInt("timesUsed", 1).coerceAtLeast(1),
+                        lastPostedAt = item.optLong("lastPostedAt", 0L)
                     )
                 )
             }
@@ -112,11 +170,16 @@ object TopicHistoryStore {
         topic: String,
         update: (TopicHistoryEntry?) -> TopicHistoryEntry
     ) {
-        val normalizedTopic = topic.trim()
+        val normalizedTopic = TopicGuardrails.normalizeTopic(topic)
+        if (normalizedTopic.isBlank()) return
         val existing = getEntries(context).toMutableList()
         val existingIndex = existing.indexOfFirst { it.topic.equals(normalizedTopic, ignoreCase = true) }
         val existingEntry = existing.getOrNull(existingIndex)
-        val updatedEntry = update(existingEntry).copy(topic = normalizedTopic)
+        val rawUpdated = update(existingEntry)
+        val updatedEntry = rawUpdated.copy(
+            topic = normalizedTopic,
+            score = TopicGuardrails.clampScore(normalizedTopic, rawUpdated.score)
+        )
 
         if (existingIndex >= 0) {
             existing[existingIndex] = updatedEntry
@@ -136,9 +199,10 @@ object TopicHistoryStore {
             jsonArray.put(
                 JSONObject()
                     .put("topic", entry.topic)
-                    .put("score", entry.score.coerceIn(MIN_TOPIC_SCORE, MAX_TOPIC_SCORE))
+                    .put("score", TopicGuardrails.clampScore(entry.topic, entry.score.coerceIn(MIN_TOPIC_SCORE, MAX_TOPIC_SCORE)))
                     .put("lastUsedAt", entry.lastUsedAt)
                     .put("timesUsed", entry.timesUsed.coerceAtLeast(1))
+                    .put("lastPostedAt", entry.lastPostedAt)
             )
         }
         prefs(context).edit().putString(KEY_TOPIC_HISTORY_JSON, jsonArray.toString()).apply()
