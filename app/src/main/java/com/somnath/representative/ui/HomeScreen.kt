@@ -44,6 +44,7 @@ import com.somnath.representative.duplicate.StubThreadDuplicationGate
 import com.somnath.representative.duplicate.TinyFingerprintCacheStore
 import com.somnath.representative.factpack.FactPack
 import com.somnath.representative.factpack.FactPackBuilder
+import com.somnath.representative.ai.PhiModelManager
 import com.somnath.representative.ai.PhiRuntime
 import com.somnath.representative.moltbook.OkHttpMoltbookApi
 import com.somnath.representative.moltbook.PostSummary
@@ -72,7 +73,8 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
     val searchProviderConfigLoader = remember { SearchProviderConfigLoader() }
     val apiKeyStore = remember { ApiKeyStore(context) }
     val moltbookApi = remember { OkHttpMoltbookApi(apiKeyProvider = { apiKeyStore.getApiKey() }) }
-    val phiRuntime = remember { PhiRuntime() }
+    val phiModelManager = remember { PhiModelManager(context) }
+    val phiRuntime = remember { PhiRuntime(context) }
     val tinyCacheStore = remember { TinyFingerprintCacheStore(context) }
     val tinyCacheGate = remember { LocalTinyCacheGate(tinyCacheStore, phiRuntime) }
     val selfHistoryGate = remember { StubSelfHistoryGate() }
@@ -104,6 +106,7 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
 
     LaunchedEffect(Unit) {
         refreshStatus()
+        phiModelManager.maybeAutoDownloadOnFirstOpen()
     }
 
     androidx.compose.runtime.DisposableEffect(lifecycleOwner) {

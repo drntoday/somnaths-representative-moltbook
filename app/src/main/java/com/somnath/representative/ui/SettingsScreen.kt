@@ -2,11 +2,14 @@ package com.somnath.representative.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -17,25 +20,34 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.somnath.representative.ai.PhiDownloadStatus
+import com.somnath.representative.ai.PhiModelManager
 import com.somnath.representative.BuildConfig
 import com.somnath.representative.data.ApiKeyStore
 import com.somnath.representative.data.SchedulerPrefs
 import com.somnath.representative.scheduler.SomnathRepScheduler
+import kotlinx.coroutines.launch
 
 @Composable
 fun SettingsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val apiKeyStore = remember { ApiKeyStore(context) }
+    val phiModelManager = remember { PhiModelManager(context) }
+    val coroutineScope = rememberCoroutineScope()
 
     var chargingOnly by remember { mutableStateOf(SchedulerPrefs.isChargingOnly(context)) }
     var wifiOnly by remember { mutableStateOf(SchedulerPrefs.isWifiOnly(context)) }
     var enableDebugTools by remember { mutableStateOf(BuildConfig.DEBUG && SchedulerPrefs.isDebugToolsEnabled(context)) }
+    var autoDownloadModel by remember { mutableStateOf(phiModelManager.isAutoDownloadEnabled()) }
+    var downloadWifiOnly by remember { mutableStateOf(phiModelManager.isWifiOnlyEnabled()) }
+    var downloadStatus by remember { mutableStateOf(phiModelManager.getInitialStatus()) }
 
     LaunchedEffect(Unit) {
         if (!BuildConfig.DEBUG) {
@@ -49,6 +61,7 @@ fun SettingsScreen(onBack: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
@@ -142,6 +155,71 @@ fun SettingsScreen(onBack: () -> Unit) {
         if (apiKeyStatus.isNotBlank()) {
             Text(text = apiKeyStatus, style = MaterialTheme.typography.bodyMedium)
         }
+
+
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(text = "Offline Phi Model (Hugging Face)", style = MaterialTheme.typography.titleMedium)
+        Text(text = "Needs ~3 GB free", style = MaterialTheme.typography.bodyMedium)
+
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(text = "Auto-download model on first open", style = MaterialTheme.typography.bodyLarge)
+            Switch(
+                checked = autoDownloadModel,
+                onCheckedChange = {
+                    autoDownloadModel = it
+                    phiModelManager.setAutoDownloadEnabled(it)
+                }
+            )
+        }
+
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(text = "Download on Wi-Fi only", style = MaterialTheme.typography.bodyLarge)
+            Switch(
+                checked = downloadWifiOnly,
+                onCheckedChange = {
+                    downloadWifiOnly = it
+                    phiModelManager.setWifiOnlyEnabled(it)
+                }
+            )
+        }
+
+        Button(
+            onClick = {
+                coroutineScope.launch {
+                    downloadStatus = phiModelManager.downloadModel { status ->
+                        downloadStatus = status
+                    }
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(text = "Download Phi Model Now")
+        }
+
+        Button(
+            onClick = {
+                val deleted = phiModelManager.deleteModel()
+                downloadStatus = if (deleted) {
+                    PhiDownloadStatus.NotDownloaded
+                } else {
+                    PhiDownloadStatus.Error("Unable to delete downloaded model.")
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(text = "Delete Downloaded Model")
+        }
+
+        val modelStatusText = when (val status = downloadStatus) {
+            is PhiDownloadStatus.NotDownloaded -> "Status: Not downloaded"
+            is PhiDownloadStatus.Ready -> "Status: Ready"
+            is PhiDownloadStatus.Error -> "Status: ${status.message}"
+            is PhiDownloadStatus.Downloading -> {
+                val pct = status.percent?.let { " ($it%)" } ?: ""
+                "Status: Downloading file ${status.fileIndex} of ${status.totalFiles}$pct"
+            }
+        }
+        Text(text = modelStatusText, style = MaterialTheme.typography.bodyMedium)
 
         Spacer(modifier = Modifier.height(16.dp))
         Button(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
