@@ -88,6 +88,9 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
 
     var fetchedPosts by remember { mutableStateOf<List<PostSummary>>(emptyList()) }
     var m3Status by remember { mutableStateOf("Idle") }
+
+    val latestCandidateText = lastGeneratedCandidate.value?.candidateText.orEmpty()
+    val latestCandidateTopic = lastGeneratedCandidate.value?.candidateTopic.orEmpty()
     var m4Prompt by remember {
         mutableStateOf("Write a calm 2-sentence reply about building Android apps.")
     }
@@ -178,12 +181,106 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
             fontWeight = FontWeight.SemiBold
         )
         Text(
-            text = lastGeneratedCandidate.value
-                ?.take(200)
-                ?.ifBlank { "No generation yet." }
-                ?: "No generation yet.",
+            text = latestCandidateText
+                .take(200)
+                .ifBlank { "No generation yet." },
             style = MaterialTheme.typography.bodyMedium
         )
+        if (latestCandidateTopic.isNotBlank()) {
+            Text(
+                text = "Topic: $latestCandidateTopic",
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+        lastGeneratedCandidate.value?.generatedAt?.let { generatedAt ->
+            val generatedAtLabel = DateFormat.format("yyyy-MM-dd HH:mm", Date(generatedAt)).toString()
+            Text(
+                text = "Generated at: $generatedAtLabel",
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+        Text(
+            text = "Manual only. Will not auto-post.",
+            style = MaterialTheme.typography.bodySmall
+        )
+        Button(
+            onClick = {
+                coroutineScope.launch {
+                    val apiKey = apiKeyStore.getApiKey()
+                    if (apiKey.isNullOrBlank()) {
+                        m3Status = "Set API key in Settings"
+                        return@launch
+                    }
+
+                    val candidateSnapshot = lastGeneratedCandidate.value
+                    if (candidateSnapshot == null || candidateSnapshot.candidateText.isBlank()) {
+                        m3Status = "No candidate yet"
+                        return@launch
+                    }
+
+                    if (!hasSubmolts) {
+                        m3Status = "No submolts configured"
+                        return@launch
+                    }
+
+                    var feedFetchFailed = false
+                    val targetPost = fetchedPosts.firstOrNull() ?: runCatching {
+                        moltbookApi.fetchFeed(submolts, limit = 1)
+                    }.fold(
+                        onSuccess = { posts ->
+                            if (posts.isNotEmpty()) {
+                                fetchedPosts = posts
+                            }
+                            posts.firstOrNull()
+                        },
+                        onFailure = {
+                            feedFetchFailed = true
+                            m3Status = it.message ?: "Fetch failed"
+                            null
+                        }
+                    )
+
+                    if (targetPost == null) {
+                        if (!feedFetchFailed) {
+                            m3Status = "No posts available to comment on."
+                        }
+                        return@launch
+                    }
+
+                    val safetyResult = safetyGuard.evaluate(
+                        threadText = candidateSnapshot.candidateTopic,
+                        draftText = candidateSnapshot.candidateText,
+                        factPack = null
+                    )
+
+                    if (safetyResult.decision == SafetyDecision.SKIP || safetyResult.decision == SafetyDecision.ASK_QUESTION) {
+                        m3Status = "Skipped: ${safetyResult.reason}"
+                        return@launch
+                    }
+
+                    val localGate = tinyCacheGate.evaluateCommentDraft(safetyResult.finalText)
+                    if (localGate.decision.status == GateStatus.SKIP) {
+                        m3Status = "Skipped duplicate"
+                        return@launch
+                    }
+
+                    val result = moltbookApi.postComment(postId = targetPost.id, body = localGate.finalDraftText)
+                    m3Status = result.fold(
+                        onSuccess = {
+                            tinyCacheGate.registerPostedFingerprint(localGate.finalFingerprint, type = "comment")
+                            tinyCacheCount = tinyCacheStore.getRecentFingerprints().size
+                            "Posted successfully"
+                        },
+                        onFailure = {
+                            it.message ?: "Post failed"
+                        }
+                    )
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(text = "Post Candidate to Moltbook (Manual)")
+        }
         if (debugToolsEnabled) {
             Button(
                 onClick = {

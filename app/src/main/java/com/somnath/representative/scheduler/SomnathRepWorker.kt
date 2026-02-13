@@ -55,7 +55,7 @@ class SomnathRepWorker(
             )
 
             if (safetyResult.decision == SafetyDecision.SKIP) {
-                LastGeneratedCandidateStore.set("")
+                LastGeneratedCandidateStore.clear()
                 val skipMessage = "Skipped: ${safetyResult.reason}"
                 SchedulerPrefs.recordScheduledCycle(applicationContext, skipMessage)
                 return Result.success()
@@ -67,12 +67,15 @@ class SomnathRepWorker(
             )
             val localGate = tinyCacheGate.evaluateCommentDraft(safetyResult.finalText)
             if (localGate.decision.status == GateStatus.SKIP) {
-                LastGeneratedCandidateStore.set("")
+                LastGeneratedCandidateStore.clear()
                 SchedulerPrefs.recordScheduledCycle(applicationContext, "Skipped duplicate")
                 return Result.success()
             }
 
-            LastGeneratedCandidateStore.set(localGate.finalDraftText)
+            LastGeneratedCandidateStore.set(
+                candidateText = localGate.finalDraftText,
+                candidateTopic = topic
+            )
             SchedulerPrefs.recordScheduledCycle(applicationContext, "Generated candidate successfully")
             Result.success()
         } catch (e: Exception) {
