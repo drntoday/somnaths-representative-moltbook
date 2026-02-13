@@ -5,6 +5,7 @@ import com.somnath.representative.BuildConfig
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.LocalDate
+import kotlin.math.max
 import kotlin.math.min
 
 private const val PREFS_NAME = "somnath_rep_prefs"
@@ -25,7 +26,25 @@ object SchedulerPrefs {
     private const val KEY_CONSECUTIVE_POST_FAILURES = "consecutivePostFailures"
     private const val KEY_NEXT_AUTO_POST_ALLOWED_AT = "nextAutoPostAllowedAt"
     private const val KEY_AUDIT_EVENTS_JSON = "auditEventsJson"
+    private const val KEY_LAST_GENERATION_AT = "lastGenerationAt"
+    private const val KEY_GENERATION_INTERVAL_MULTIPLIER = "generationIntervalMultiplier"
+    private const val KEY_RECENT_CYCLE_OUTCOMES = "recentCycleOutcomes"
     private const val MAX_AUDIT_EVENTS = 10
+    private const val MAX_CYCLE_OUTCOMES = 3
+
+    private const val BASE_INTERVAL_MULTIPLIER = 1.0f
+    private const val MAX_INTERVAL_MULTIPLIER = 8.0f
+
+    enum class CycleOutcome {
+        NO_CANDIDATE,
+        SKIPPED_RATE_LIMIT,
+        SKIPPED_SAFETY,
+        SKIPPED_COOLDOWN,
+        SKIPPED_LOW_BATTERY,
+        SKIPPED_LOW_MEMORY,
+        GENERATED,
+        POST_SUCCESS
+    }
 
     data class AuditEvent(
         val timestamp: Long,
@@ -97,6 +116,55 @@ object SchedulerPrefs {
 
     fun getConsecutivePostFailures(context: Context): Int =
         prefs(context).getInt(KEY_CONSECUTIVE_POST_FAILURES, 0)
+
+    fun getLastGenerationAt(context: Context): Long =
+        prefs(context).getLong(KEY_LAST_GENERATION_AT, 0L)
+
+    fun recordGenerationCompleted(context: Context, generatedAt: Long = System.currentTimeMillis()) {
+        prefs(context).edit().putLong(KEY_LAST_GENERATION_AT, generatedAt).apply()
+    }
+
+    fun getGenerationIntervalMultiplier(context: Context): Float {
+        val stored = prefs(context).getFloat(KEY_GENERATION_INTERVAL_MULTIPLIER, BASE_INTERVAL_MULTIPLIER)
+        return stored.coerceIn(BASE_INTERVAL_MULTIPLIER, MAX_INTERVAL_MULTIPLIER)
+    }
+
+    fun getEffectiveIntervalMinutes(context: Context, baseMinutes: Long): Long {
+        val multiplier = getGenerationIntervalMultiplier(context)
+        return max(15L, (baseMinutes.toFloat() * multiplier).toLong())
+    }
+
+    fun updateAdaptiveInterval(context: Context, cycleOutcome: CycleOutcome): Float {
+        val pref = prefs(context)
+        val existingRaw = pref.getString(KEY_RECENT_CYCLE_OUTCOMES, null)
+        val outcomes = (existingRaw ?: "").split(',').filter { it.isNotBlank() }.toMutableList()
+        outcomes.add(cycleOutcome.name)
+        while (outcomes.size > MAX_CYCLE_OUTCOMES) {
+            outcomes.removeAt(0)
+        }
+
+        var nextMultiplier = getGenerationIntervalMultiplier(context)
+        val shouldReset = cycleOutcome == CycleOutcome.GENERATED || cycleOutcome == CycleOutcome.POST_SUCCESS
+        val negativeSignals = setOf(
+            CycleOutcome.NO_CANDIDATE.name,
+            CycleOutcome.SKIPPED_RATE_LIMIT.name,
+            CycleOutcome.SKIPPED_SAFETY.name
+        )
+
+        if (shouldReset) {
+            nextMultiplier = BASE_INTERVAL_MULTIPLIER
+            outcomes.clear()
+        } else if (outcomes.size == MAX_CYCLE_OUTCOMES && outcomes.all { it in negativeSignals }) {
+            nextMultiplier = (nextMultiplier * 1.5f).coerceAtMost(MAX_INTERVAL_MULTIPLIER)
+        }
+
+        pref.edit()
+            .putString(KEY_RECENT_CYCLE_OUTCOMES, outcomes.joinToString(","))
+            .putFloat(KEY_GENERATION_INTERVAL_MULTIPLIER, nextMultiplier)
+            .apply()
+
+        return nextMultiplier
+    }
 
     fun getNextAutoPostAllowedAt(context: Context): Long =
         prefs(context).getLong(KEY_NEXT_AUTO_POST_ALLOWED_AT, 0L)

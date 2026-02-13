@@ -1,8 +1,12 @@
 package com.somnath.representative.scheduler
 
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.BatteryManager
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import com.somnath.representative.ai.ModelSessionManager
 import com.somnath.representative.ai.PhiInferenceEngine
 import com.somnath.representative.ai.PhiRuntime
 import com.somnath.representative.data.ApiKeyStore
@@ -27,6 +31,7 @@ import kotlinx.coroutines.withContext
 
 private const val DEFAULT_TOPIC = "Android background tasks"
 private const val AUTO_POST_CONFIDENCE_THRESHOLD = 80
+private const val GENERATION_COOLDOWN_MS = 30L * 60L * 1000L
 
 class SomnathRepWorker(
     appContext: Context,
@@ -35,6 +40,28 @@ class SomnathRepWorker(
 
     override suspend fun doWork(): Result {
         return try {
+            if (shouldSkipForCooldown()) {
+                SchedulerPrefs.recordScheduledCycle(applicationContext, "Skipped: cooldown")
+                SchedulerPrefs.updateAdaptiveInterval(applicationContext, SchedulerPrefs.CycleOutcome.NO_CANDIDATE)
+                refreshPeriodicSchedule()
+                return Result.success()
+            }
+
+            if (shouldSkipForLowBattery()) {
+                SchedulerPrefs.recordScheduledCycle(applicationContext, "Skipped: low battery")
+                SchedulerPrefs.updateAdaptiveInterval(applicationContext, SchedulerPrefs.CycleOutcome.NO_CANDIDATE)
+                refreshPeriodicSchedule()
+                return Result.success()
+            }
+
+            if (isMemoryPressureHigh()) {
+                ModelSessionManager.unloadNow()
+                SchedulerPrefs.recordScheduledCycle(applicationContext, "Skipped: low memory")
+                SchedulerPrefs.updateAdaptiveInterval(applicationContext, SchedulerPrefs.CycleOutcome.NO_CANDIDATE)
+                refreshPeriodicSchedule()
+                return Result.success()
+            }
+
             SchedulerPrefs.updateLastActionMessage(applicationContext, "Generating")
             SchedulerPrefs.recordAuditEvent(applicationContext, "WORKER_RAN", "Worker ran")
 
@@ -63,7 +90,9 @@ class SomnathRepWorker(
             val selectedStyle = PromptStyleStatsStore.selectStyle(applicationContext)
             PromptStyleStatsStore.recordStyleUsed(applicationContext, selectedStyle)
             val prompt = buildPrompt(style = selectedStyle, topic = topic, factPack = factPack)
-            val generatedCandidate = PhiInferenceEngine(applicationContext).generate(prompt).trim()
+            val generatedCandidate = withContext(Dispatchers.Default) {
+                PhiInferenceEngine(applicationContext).generate(prompt).trim()
+            }
 
             val safetyResult = SafetyGuard().evaluate(
                 threadText = topic,
@@ -77,6 +106,8 @@ class SomnathRepWorker(
                 TopicHistoryStore.applyScoreDelta(applicationContext, topic, delta = -2)
                 SchedulerPrefs.recordAuditEvent(applicationContext, "SKIPPED_SAFETY", safetyResult.reason.take(80))
                 SchedulerPrefs.recordScheduledCycle(applicationContext, "Skipped: ${safetyResult.reason}")
+                SchedulerPrefs.updateAdaptiveInterval(applicationContext, SchedulerPrefs.CycleOutcome.SKIPPED_SAFETY)
+                refreshPeriodicSchedule()
                 return Result.success()
             }
             PromptStyleStatsStore.applyScoreDelta(applicationContext, selectedStyle, delta = 1)
@@ -93,6 +124,8 @@ class SomnathRepWorker(
                 TopicHistoryStore.applyScoreDelta(applicationContext, topic, delta = -1)
                 SchedulerPrefs.recordAuditEvent(applicationContext, "SKIPPED_DUPLICATE", "Duplicate")
                 SchedulerPrefs.recordScheduledCycle(applicationContext, "Skipped duplicate")
+                SchedulerPrefs.updateAdaptiveInterval(applicationContext, SchedulerPrefs.CycleOutcome.NO_CANDIDATE)
+                refreshPeriodicSchedule()
                 return Result.success()
             }
 
@@ -101,7 +134,10 @@ class SomnathRepWorker(
                 candidateTopic = topic,
                 candidateStyle = selectedStyle
             )
+            SchedulerPrefs.recordGenerationCompleted(applicationContext)
             SchedulerPrefs.recordAuditEvent(applicationContext, "GENERATED", "Draft generated")
+            SchedulerPrefs.updateAdaptiveInterval(applicationContext, SchedulerPrefs.CycleOutcome.GENERATED)
+            refreshPeriodicSchedule()
 
             if (SchedulerPrefs.isEmergencyStopEnabled(applicationContext)) {
                 SchedulerPrefs.recordAuditEvent(applicationContext, "SKIPPED_SAFETY", "Emergency stop")
@@ -122,6 +158,8 @@ class SomnathRepWorker(
             if (SchedulerPrefs.isAutoPostInCooldown(applicationContext)) {
                 SchedulerPrefs.recordAuditEvent(applicationContext, "SKIPPED_RATE_LIMIT", "Cooldown")
                 SchedulerPrefs.recordScheduledCycle(applicationContext, "Auto-post cooldown active")
+                SchedulerPrefs.updateAdaptiveInterval(applicationContext, SchedulerPrefs.CycleOutcome.SKIPPED_RATE_LIMIT)
+                refreshPeriodicSchedule()
                 return Result.success()
             }
 
@@ -129,12 +167,16 @@ class SomnathRepWorker(
             if (postableTopic == null || postableTopic != topic) {
                 SchedulerPrefs.recordAuditEvent(applicationContext, "SKIPPED_RATE_LIMIT", "Topic cooldown active")
                 SchedulerPrefs.recordScheduledCycle(applicationContext, "Auto-post skipped: topic cooldown active")
+                SchedulerPrefs.updateAdaptiveInterval(applicationContext, SchedulerPrefs.CycleOutcome.SKIPPED_RATE_LIMIT)
+                refreshPeriodicSchedule()
                 return Result.success()
             }
 
             if (!AutonomousPostRateLimiter.canPostNow(applicationContext)) {
                 SchedulerPrefs.recordAuditEvent(applicationContext, "SKIPPED_RATE_LIMIT", "Rate limit")
                 SchedulerPrefs.recordScheduledCycle(applicationContext, "Rate limit reached")
+                SchedulerPrefs.updateAdaptiveInterval(applicationContext, SchedulerPrefs.CycleOutcome.SKIPPED_RATE_LIMIT)
+                refreshPeriodicSchedule()
                 return Result.success()
             }
 
@@ -165,6 +207,7 @@ class SomnathRepWorker(
                     TopicHistoryStore.applyScoreDelta(applicationContext, topic, delta = 2)
                     SchedulerPrefs.recordAuditEvent(applicationContext, "AUTO_POST_SUCCESS", "Posted")
                     SchedulerPrefs.recordScheduledCycle(applicationContext, "Auto-posted successfully")
+                    SchedulerPrefs.updateAdaptiveInterval(applicationContext, SchedulerPrefs.CycleOutcome.POST_SUCCESS)
                 },
                 onFailure = {
                     SchedulerPrefs.recordAutoPostFailure(applicationContext)
@@ -175,6 +218,8 @@ class SomnathRepWorker(
                 }
             )
 
+            refreshPeriodicSchedule()
+
             Result.success()
         } catch (e: Exception) {
             SchedulerPrefs.incrementErrors(applicationContext)
@@ -184,6 +229,37 @@ class SomnathRepWorker(
             )
             Result.retry()
         }
+    }
+
+    private fun refreshPeriodicSchedule() {
+        SomnathRepScheduler.schedule(
+            context = applicationContext,
+            chargingOnly = SchedulerPrefs.isChargingOnly(applicationContext),
+            wifiOnly = SchedulerPrefs.isWifiOnly(applicationContext)
+        )
+    }
+
+    private fun shouldSkipForCooldown(now: Long = System.currentTimeMillis()): Boolean {
+        if (SchedulerPrefs.isAutonomousModeEnabled(applicationContext)) return false
+        if (inputData.getBoolean(KEY_MANUAL_ACTION_TRIGGERED, false)) return false
+        val lastGenerationAt = SchedulerPrefs.getLastGenerationAt(applicationContext)
+        return lastGenerationAt > 0L && now - lastGenerationAt < GENERATION_COOLDOWN_MS
+    }
+
+    private fun shouldSkipForLowBattery(): Boolean {
+        val batteryStatus = applicationContext.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED)) ?: return false
+        val level = batteryStatus.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+        val scale = batteryStatus.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
+        val status = batteryStatus.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
+        val isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL
+        if (level <= 0 || scale <= 0) return false
+        val batteryPercent = (level * 100f) / scale.toFloat()
+        return batteryPercent < 20f && !isCharging
+    }
+
+    private fun isMemoryPressureHigh(): Boolean {
+        val runtime = Runtime.getRuntime()
+        return runtime.freeMemory().toDouble() < runtime.maxMemory().toDouble() * 0.10
     }
 
     private fun buildPrompt(style: PromptStyle, topic: String, factPack: FactPack?): String {
@@ -207,3 +283,5 @@ class SomnathRepWorker(
         }
     }
 }
+
+private const val KEY_MANUAL_ACTION_TRIGGERED = "manualActionTriggered"
