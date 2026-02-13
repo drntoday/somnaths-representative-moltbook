@@ -72,7 +72,7 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
     val searchProviderConfigLoader = remember { SearchProviderConfigLoader() }
     val apiKeyStore = remember { ApiKeyStore(context) }
     val moltbookApi = remember { OkHttpMoltbookApi(apiKeyProvider = { apiKeyStore.getApiKey() }) }
-    val phiRuntime = remember { PhiRuntime() }
+    val phiRuntime = remember { PhiRuntime(context) }
     val tinyCacheStore = remember { TinyFingerprintCacheStore(context) }
     val tinyCacheGate = remember { LocalTinyCacheGate(tinyCacheStore, phiRuntime) }
     val selfHistoryGate = remember { StubSelfHistoryGate() }
