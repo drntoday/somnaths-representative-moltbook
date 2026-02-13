@@ -95,7 +95,9 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
     var m4Confidence by remember { mutableStateOf<Int?>(null) }
     var m4Decision by remember { mutableStateOf<String?>(null) }
 
-    var m5Topic by remember { mutableStateOf("Latest Android AI release") }
+    var m5Topic by remember {
+        mutableStateOf(SchedulerPrefs.getTopicQuery(context).ifBlank { "Latest Android AI release" })
+    }
     var m5Status by remember { mutableStateOf("Idle") }
     var m5FactPack by remember { mutableStateOf<FactPack?>(null) }
     var tinyCacheCount by remember { mutableStateOf(tinyCacheStore.getRecentFingerprints().size) }
@@ -165,6 +167,10 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
             style = MaterialTheme.typography.bodyLarge
         )
         Text(text = "Errors: ${homeStatus.value.errorsCount}", style = MaterialTheme.typography.bodyLarge)
+        Text(
+            text = "Last pipeline: RSS+FactPack -> Safety -> DupGate -> Generated/Skipped",
+            style = MaterialTheme.typography.bodyMedium
+        )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
             text = "Last Generated Candidate",
@@ -410,7 +416,10 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
 
         TextField(
             value = m5Topic,
-            onValueChange = { m5Topic = it },
+            onValueChange = {
+                m5Topic = it
+                SchedulerPrefs.setTopicQuery(context, it)
+            },
             modifier = Modifier.fillMaxWidth(),
             label = { Text("Topic / Query") }
         )
