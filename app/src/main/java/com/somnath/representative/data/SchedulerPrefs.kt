@@ -31,6 +31,11 @@ object SchedulerPrefs {
     private const val KEY_RECENT_CYCLE_OUTCOMES = "recentCycleOutcomes"
     private const val KEY_SELF_CHECK_STATUS = "selfCheckStatus"
     private const val KEY_SELF_CHECK_ISSUES = "selfCheckIssues"
+    private const val KEY_M12_TOTAL_GENERATIONS = "m12_total_generations"
+    private const val KEY_M12_OK_WITHOUT_REWRITE = "m12_ok_without_rewrite"
+    private const val KEY_M12_REWRITES_ATTEMPTED = "m12_rewrites_attempted"
+    private const val KEY_M12_REWRITES_USED = "m12_rewrites_used"
+    private const val KEY_M12_SKIPPED_AFTER_SELFCHECK = "m12_skipped_after_selfcheck"
     private const val MAX_AUDIT_EVENTS = 10
     private const val MAX_CYCLE_OUTCOMES = 3
 
@@ -65,6 +70,14 @@ object SchedulerPrefs {
         val lastActionMessage: String,
         val actionsTodayCount: Int,
         val errorsCount: Int
+    )
+
+    data class M12Stats(
+        val totalGenerations: Int,
+        val okWithoutRewrite: Int,
+        val rewritesAttempted: Int,
+        val rewritesUsed: Int,
+        val skippedAfterSelfCheck: Int
     )
 
     private fun prefs(context: Context) =
@@ -207,6 +220,47 @@ object SchedulerPrefs {
     fun getSelfCheckIssues(context: Context): String =
         prefs(context).getString(KEY_SELF_CHECK_ISSUES, "none")?.ifBlank { "none" } ?: "none"
 
+    fun incrementM12TotalGenerations(context: Context) {
+        incrementCounter(context, KEY_M12_TOTAL_GENERATIONS)
+    }
+
+    fun incrementM12OkWithoutRewrite(context: Context) {
+        incrementCounter(context, KEY_M12_OK_WITHOUT_REWRITE)
+    }
+
+    fun incrementM12RewritesAttempted(context: Context) {
+        incrementCounter(context, KEY_M12_REWRITES_ATTEMPTED)
+    }
+
+    fun incrementM12RewritesUsed(context: Context) {
+        incrementCounter(context, KEY_M12_REWRITES_USED)
+    }
+
+    fun incrementM12SkippedAfterSelfCheck(context: Context) {
+        incrementCounter(context, KEY_M12_SKIPPED_AFTER_SELFCHECK)
+    }
+
+    fun getM12Stats(context: Context): M12Stats {
+        val pref = prefs(context)
+        return M12Stats(
+            totalGenerations = pref.getInt(KEY_M12_TOTAL_GENERATIONS, 0),
+            okWithoutRewrite = pref.getInt(KEY_M12_OK_WITHOUT_REWRITE, 0),
+            rewritesAttempted = pref.getInt(KEY_M12_REWRITES_ATTEMPTED, 0),
+            rewritesUsed = pref.getInt(KEY_M12_REWRITES_USED, 0),
+            skippedAfterSelfCheck = pref.getInt(KEY_M12_SKIPPED_AFTER_SELFCHECK, 0)
+        )
+    }
+
+    fun resetM12Stats(context: Context) {
+        prefs(context).edit()
+            .putInt(KEY_M12_TOTAL_GENERATIONS, 0)
+            .putInt(KEY_M12_OK_WITHOUT_REWRITE, 0)
+            .putInt(KEY_M12_REWRITES_ATTEMPTED, 0)
+            .putInt(KEY_M12_REWRITES_USED, 0)
+            .putInt(KEY_M12_SKIPPED_AFTER_SELFCHECK, 0)
+            .apply()
+    }
+
     fun isAutoPostInCooldown(context: Context, now: Long = System.currentTimeMillis()): Boolean {
         val nextAllowedAt = getNextAutoPostAllowedAt(context)
         return nextAllowedAt > 0L && now < nextAllowedAt
@@ -321,5 +375,10 @@ object SchedulerPrefs {
             actionsTodayCount = count,
             errorsCount = pref.getInt(KEY_ERRORS_COUNT, 0)
         )
+    }
+
+    private fun incrementCounter(context: Context, key: String) {
+        val pref = prefs(context)
+        pref.edit().putInt(key, pref.getInt(key, 0) + 1).apply()
     }
 }
