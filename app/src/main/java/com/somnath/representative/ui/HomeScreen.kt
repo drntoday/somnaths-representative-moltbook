@@ -34,6 +34,7 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import com.somnath.representative.BuildConfig
 import com.somnath.representative.data.ApiKeyStore
+import com.somnath.representative.data.LastGeneratedCandidateStore
 import com.somnath.representative.data.RssFeedConfigLoader
 import com.somnath.representative.data.SchedulerPrefs
 import com.somnath.representative.data.SubmoltConfigLoader
@@ -68,6 +69,7 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
     val coroutineScope = rememberCoroutineScope()
 
     val homeStatus = remember { mutableStateOf(SchedulerPrefs.getHomeStatus(context)) }
+    val lastGeneratedCandidate = remember { mutableStateOf(LastGeneratedCandidateStore.get()) }
     val submolts = remember { SubmoltConfigLoader().load(context) }
     val rssFeedLoader = remember { RssFeedConfigLoader() }
     val searchProviderConfigLoader = remember { SearchProviderConfigLoader() }
@@ -102,6 +104,7 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
 
     fun refreshStatus() {
         homeStatus.value = SchedulerPrefs.getHomeStatus(context)
+        lastGeneratedCandidate.value = LastGeneratedCandidateStore.get()
     }
 
     LaunchedEffect(Unit) {
@@ -162,6 +165,19 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
             style = MaterialTheme.typography.bodyLarge
         )
         Text(text = "Errors: ${homeStatus.value.errorsCount}", style = MaterialTheme.typography.bodyLarge)
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = "Last Generated Candidate",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold
+        )
+        Text(
+            text = lastGeneratedCandidate.value
+                ?.take(200)
+                ?.ifBlank { "No generation yet." }
+                ?: "No generation yet.",
+            style = MaterialTheme.typography.bodyMedium
+        )
         if (debugToolsEnabled) {
             Button(
                 onClick = {
