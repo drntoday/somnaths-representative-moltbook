@@ -9,6 +9,7 @@ import androidx.work.WorkerParameters
 import com.somnath.representative.ai.ModelSessionManager
 import com.somnath.representative.ai.PhiInferenceEngine
 import com.somnath.representative.ai.PhiRuntime
+import com.somnath.representative.ai.SelfReflectionEngine
 import com.somnath.representative.data.ApiKeyStore
 import com.somnath.representative.data.AutonomousPostRateLimiter
 import com.somnath.representative.data.LastGeneratedCandidateStore
@@ -89,27 +90,91 @@ class SomnathRepWorker(
 
             val selectedStyle = PromptStyleStatsStore.selectStyle(applicationContext)
             PromptStyleStatsStore.recordStyleUsed(applicationContext, selectedStyle)
+            val inferenceEngine = PhiInferenceEngine(applicationContext)
             val prompt = buildPrompt(style = selectedStyle, topic = topic, factPack = factPack)
-            val generatedCandidate = withContext(Dispatchers.Default) {
-                PhiInferenceEngine(applicationContext).generate(prompt).trim()
+            val generatedDraft = withContext(Dispatchers.Default) {
+                inferenceEngine.generate(prompt).trim()
             }
 
-            val safetyResult = SafetyGuard().evaluate(
+            val pass1Safety = SafetyGuard().evaluate(
                 threadText = topic,
-                draftText = generatedCandidate,
+                draftText = generatedDraft,
                 factPack = factPack
             )
 
-            if (safetyResult.decision == SafetyDecision.SKIP) {
+            if (pass1Safety.decision == SafetyDecision.SKIP) {
                 LastGeneratedCandidateStore.clear()
+                SchedulerPrefs.setSelfCheckSummary(applicationContext, status = "Skipped", issues = listOf("safety skip"))
                 PromptStyleStatsStore.applyScoreDelta(applicationContext, selectedStyle, delta = -2)
                 TopicHistoryStore.applyScoreDelta(applicationContext, topic, delta = -2)
-                SchedulerPrefs.recordAuditEvent(applicationContext, "SKIPPED_SAFETY", safetyResult.reason.take(80))
-                SchedulerPrefs.recordScheduledCycle(applicationContext, "Skipped: ${safetyResult.reason}")
+                SchedulerPrefs.recordAuditEvent(applicationContext, "SKIPPED_SAFETY", pass1Safety.reason.take(80))
+                SchedulerPrefs.recordScheduledCycle(applicationContext, "Skipped: ${pass1Safety.reason}")
                 SchedulerPrefs.updateAdaptiveInterval(applicationContext, SchedulerPrefs.CycleOutcome.SKIPPED_SAFETY)
                 refreshPeriodicSchedule()
                 return Result.success()
             }
+
+            val critique = SelfReflectionEngine.critique(
+                topic = topic,
+                draft = pass1Safety.finalText,
+                factPack = factPack,
+                safetyDecision = pass1Safety.decision.name,
+                confidence = pass1Safety.confidence
+            )
+
+            var selfCheckStatus = "OK"
+            var selfCheckIssues = critique.issues
+            var finalSafetyResult = pass1Safety
+
+            if (critique.needsRewrite) {
+                val rewritePrompt = critique.suggestedRewritePrompt
+                    ?: SelfReflectionEngine.buildRewritePrompt(topic, pass1Safety.finalText, critique.issues, factPack)
+                val rewrittenDraft = withContext(Dispatchers.Default) {
+                    inferenceEngine.generate(rewritePrompt, maxTokens = 220).trim()
+                }
+                val pass2Safety = SafetyGuard().evaluate(
+                    threadText = topic,
+                    draftText = rewrittenDraft,
+                    factPack = factPack
+                )
+                if (pass2Safety.decision == SafetyDecision.SKIP) {
+                    LastGeneratedCandidateStore.clear()
+                    SchedulerPrefs.setSelfCheckSummary(applicationContext, status = "Skipped", issues = critique.issues)
+                    PromptStyleStatsStore.applyScoreDelta(applicationContext, selectedStyle, delta = -2)
+                    TopicHistoryStore.applyScoreDelta(applicationContext, topic, delta = -2)
+                    SchedulerPrefs.recordAuditEvent(applicationContext, "SKIPPED_SAFETY", "rewrite failed safety")
+                    SchedulerPrefs.recordScheduledCycle(applicationContext, "Skipped: rewrite failed safety")
+                    SchedulerPrefs.updateAdaptiveInterval(applicationContext, SchedulerPrefs.CycleOutcome.SKIPPED_SAFETY)
+                    refreshPeriodicSchedule()
+                    return Result.success()
+                }
+
+                val postRewriteCritique = SelfReflectionEngine.critique(
+                    topic = topic,
+                    draft = pass2Safety.finalText,
+                    factPack = factPack,
+                    safetyDecision = pass2Safety.decision.name,
+                    confidence = pass2Safety.confidence
+                )
+
+                if (postRewriteCritique.needsRewrite) {
+                    LastGeneratedCandidateStore.clear()
+                    SchedulerPrefs.setSelfCheckSummary(applicationContext, status = "Skipped", issues = postRewriteCritique.issues)
+                    PromptStyleStatsStore.applyScoreDelta(applicationContext, selectedStyle, delta = -1)
+                    TopicHistoryStore.applyScoreDelta(applicationContext, topic, delta = -1)
+                    SchedulerPrefs.recordAuditEvent(applicationContext, "SKIPPED_SAFETY", "rewrite unresolved issues")
+                    SchedulerPrefs.recordScheduledCycle(applicationContext, "Skipped: rewrite unresolved issues")
+                    SchedulerPrefs.updateAdaptiveInterval(applicationContext, SchedulerPrefs.CycleOutcome.SKIPPED_SAFETY)
+                    refreshPeriodicSchedule()
+                    return Result.success()
+                }
+
+                finalSafetyResult = pass2Safety
+                selfCheckStatus = "Rewrote"
+                selfCheckIssues = critique.issues
+            }
+
+            SchedulerPrefs.setSelfCheckSummary(applicationContext, status = selfCheckStatus, issues = selfCheckIssues)
             PromptStyleStatsStore.applyScoreDelta(applicationContext, selectedStyle, delta = 1)
             TopicHistoryStore.applyScoreDelta(applicationContext, topic, delta = 1)
 
@@ -117,7 +182,7 @@ class SomnathRepWorker(
                 cacheStore = TinyFingerprintCacheStore(applicationContext),
                 phiRuntime = PhiRuntime(applicationContext)
             )
-            val localGate = tinyCacheGate.evaluateCommentDraft(safetyResult.finalText)
+            val localGate = tinyCacheGate.evaluateCommentDraft(finalSafetyResult.finalText)
             if (localGate.decision.status == GateStatus.SKIP) {
                 LastGeneratedCandidateStore.clear()
                 PromptStyleStatsStore.applyScoreDelta(applicationContext, selectedStyle, delta = -1)
@@ -150,7 +215,7 @@ class SomnathRepWorker(
                 return Result.success()
             }
 
-            if (safetyResult.confidence < AUTO_POST_CONFIDENCE_THRESHOLD) {
+            if (finalSafetyResult.confidence < AUTO_POST_CONFIDENCE_THRESHOLD) {
                 SchedulerPrefs.recordScheduledCycle(applicationContext, "Auto-post skipped: confidence too low")
                 return Result.success()
             }

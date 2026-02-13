@@ -8,4 +8,8 @@ class PhiRuntime(context: Context) {
     fun generate(prompt: String): String {
         return ModelSessionManager.generate(appContext, prompt)
     }
+
+    fun generate(prompt: String, @Suppress("UNUSED_PARAMETER") maxTokens: Int): String {
+        return ModelSessionManager.generate(appContext, prompt)
+    }
 }

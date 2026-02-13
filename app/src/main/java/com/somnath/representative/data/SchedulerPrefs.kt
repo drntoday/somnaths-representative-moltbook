@@ -29,6 +29,8 @@ object SchedulerPrefs {
     private const val KEY_LAST_GENERATION_AT = "lastGenerationAt"
     private const val KEY_GENERATION_INTERVAL_MULTIPLIER = "generationIntervalMultiplier"
     private const val KEY_RECENT_CYCLE_OUTCOMES = "recentCycleOutcomes"
+    private const val KEY_SELF_CHECK_STATUS = "selfCheckStatus"
+    private const val KEY_SELF_CHECK_ISSUES = "selfCheckIssues"
     private const val MAX_AUDIT_EVENTS = 10
     private const val MAX_CYCLE_OUTCOMES = 3
 
@@ -190,6 +192,20 @@ object SchedulerPrefs {
 
     fun getNextAutoPostAllowedAt(context: Context): Long =
         prefs(context).getLong(KEY_NEXT_AUTO_POST_ALLOWED_AT, 0L)
+
+
+    fun setSelfCheckSummary(context: Context, status: String, issues: List<String>) {
+        prefs(context).edit()
+            .putString(KEY_SELF_CHECK_STATUS, status.take(24))
+            .putString(KEY_SELF_CHECK_ISSUES, issues.take(2).joinToString(" | ").take(120))
+            .apply()
+    }
+
+    fun getSelfCheckStatus(context: Context): String =
+        prefs(context).getString(KEY_SELF_CHECK_STATUS, "—") ?: "—"
+
+    fun getSelfCheckIssues(context: Context): String =
+        prefs(context).getString(KEY_SELF_CHECK_ISSUES, "none")?.ifBlank { "none" } ?: "none"
 
     fun isAutoPostInCooldown(context: Context, now: Long = System.currentTimeMillis()): Boolean {
         val nextAllowedAt = getNextAutoPostAllowedAt(context)
