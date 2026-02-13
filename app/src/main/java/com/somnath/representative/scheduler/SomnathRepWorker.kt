@@ -11,6 +11,7 @@ import com.somnath.representative.data.LastGeneratedCandidateStore
 import com.somnath.representative.data.RssFeedConfigLoader
 import com.somnath.representative.data.SchedulerPrefs
 import com.somnath.representative.data.SubmoltConfigLoader
+import com.somnath.representative.data.TopicHistoryStore
 import com.somnath.representative.duplicate.GateStatus
 import com.somnath.representative.duplicate.LocalTinyCacheGate
 import com.somnath.representative.duplicate.TinyFingerprintCacheStore
@@ -36,7 +37,14 @@ class SomnathRepWorker(
             SchedulerPrefs.updateLastActionMessage(applicationContext, "Generating")
             SchedulerPrefs.recordAuditEvent(applicationContext, "WORKER_RAN", "Worker ran")
 
-            val topic = SchedulerPrefs.getTopicQuery(applicationContext).ifBlank { DEFAULT_TOPIC }
+            val baseTopic = SchedulerPrefs.getTopicQuery(applicationContext).ifBlank { DEFAULT_TOPIC }
+            val configuredSubmolts = SubmoltConfigLoader().load(applicationContext)
+            val topic = TopicHistoryStore.selectAdaptiveTopic(
+                context = applicationContext,
+                defaultTopic = baseTopic,
+                explorationPool = configuredSubmolts
+            )
+            TopicHistoryStore.recordTopicUsed(applicationContext, topic)
 
             val rssFeeds = RssFeedConfigLoader().load(applicationContext)
             val rssItems = withContext(Dispatchers.IO) {
@@ -62,10 +70,12 @@ class SomnathRepWorker(
 
             if (safetyResult.decision == SafetyDecision.SKIP) {
                 LastGeneratedCandidateStore.clear()
+                TopicHistoryStore.applyScoreDelta(applicationContext, topic, delta = -2)
                 SchedulerPrefs.recordAuditEvent(applicationContext, "SKIPPED_SAFETY", safetyResult.reason.take(80))
                 SchedulerPrefs.recordScheduledCycle(applicationContext, "Skipped: ${safetyResult.reason}")
                 return Result.success()
             }
+            TopicHistoryStore.applyScoreDelta(applicationContext, topic, delta = 1)
 
             val tinyCacheGate = LocalTinyCacheGate(
                 cacheStore = TinyFingerprintCacheStore(applicationContext),
@@ -74,6 +84,7 @@ class SomnathRepWorker(
             val localGate = tinyCacheGate.evaluateCommentDraft(safetyResult.finalText)
             if (localGate.decision.status == GateStatus.SKIP) {
                 LastGeneratedCandidateStore.clear()
+                TopicHistoryStore.applyScoreDelta(applicationContext, topic, delta = -1)
                 SchedulerPrefs.recordAuditEvent(applicationContext, "SKIPPED_DUPLICATE", "Duplicate")
                 SchedulerPrefs.recordScheduledCycle(applicationContext, "Skipped duplicate")
                 return Result.success()
@@ -113,8 +124,7 @@ class SomnathRepWorker(
                 return Result.success()
             }
 
-            val submolts = SubmoltConfigLoader().load(applicationContext)
-            if (submolts.isEmpty()) {
+            if (configuredSubmolts.isEmpty()) {
                 SchedulerPrefs.recordScheduledCycle(applicationContext, "Auto-post skipped: no submolts")
                 return Result.success()
             }
@@ -122,7 +132,7 @@ class SomnathRepWorker(
             val apiStore = ApiKeyStore(applicationContext)
             val moltbookApi = OkHttpMoltbookApi(apiKeyProvider = { apiStore.getApiKey() })
             val targetPost = runCatching {
-                moltbookApi.fetchFeed(submolts, limit = 1).firstOrNull()
+                moltbookApi.fetchFeed(configuredSubmolts, limit = 1).firstOrNull()
             }.getOrNull()
 
             if (targetPost == null) {
@@ -136,11 +146,13 @@ class SomnathRepWorker(
                     tinyCacheGate.registerPostedFingerprint(localGate.finalFingerprint, type = "comment")
                     AutonomousPostRateLimiter.recordSuccessfulPost(applicationContext)
                     SchedulerPrefs.recordAutoPostSuccess(applicationContext)
+                    TopicHistoryStore.applyScoreDelta(applicationContext, topic, delta = 2)
                     SchedulerPrefs.recordAuditEvent(applicationContext, "AUTO_POST_SUCCESS", "Posted")
                     SchedulerPrefs.recordScheduledCycle(applicationContext, "Auto-posted successfully")
                 },
                 onFailure = {
                     SchedulerPrefs.recordAutoPostFailure(applicationContext)
+                    TopicHistoryStore.applyScoreDelta(applicationContext, topic, delta = -3)
                     SchedulerPrefs.recordAuditEvent(applicationContext, "AUTO_POST_FAIL", (it.message ?: "Auto-post failed").take(80))
                     SchedulerPrefs.recordScheduledCycle(applicationContext, "Auto-post failed")
                 }
