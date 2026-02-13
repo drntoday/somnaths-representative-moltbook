@@ -232,11 +232,19 @@ class SomnathRepWorker(
     }
 
     private fun refreshPeriodicSchedule() {
-        SomnathRepScheduler.schedule(
-            context = applicationContext,
-            chargingOnly = SchedulerPrefs.isChargingOnly(applicationContext),
-            wifiOnly = SchedulerPrefs.isWifiOnly(applicationContext)
-        )
+        if (!SchedulerPrefs.isSchedulerEnabled(applicationContext)) {
+            return
+        }
+
+        if (SchedulerPrefs.isAutonomousModeEnabled(applicationContext)) {
+            SomnathRepScheduler.rescheduleWithAdaptiveDelay(applicationContext)
+        } else {
+            SomnathRepScheduler.schedule(
+                context = applicationContext,
+                chargingOnly = SchedulerPrefs.isChargingOnly(applicationContext),
+                wifiOnly = SchedulerPrefs.isWifiOnly(applicationContext)
+            )
+        }
     }
 
     private fun shouldSkipForCooldown(now: Long = System.currentTimeMillis()): Boolean {
