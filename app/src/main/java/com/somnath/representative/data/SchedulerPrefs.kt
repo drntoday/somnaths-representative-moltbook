@@ -64,7 +64,14 @@ object SchedulerPrefs {
         pref.edit().putInt(KEY_ERRORS_COUNT, current + 1).apply()
     }
 
-    fun recordScheduledCycle(context: Context) {
+    fun updateLastActionMessage(context: Context, message: String) {
+        prefs(context).edit()
+            .putLong(KEY_LAST_ACTION_TIME, System.currentTimeMillis())
+            .putString(KEY_LAST_ACTION_MESSAGE, message)
+            .apply()
+    }
+
+    fun recordScheduledCycle(context: Context, message: String = "Scheduled cycle ran") {
         val pref = prefs(context)
         val today = LocalDate.now().toString()
         val storedDate = pref.getString(KEY_ACTIONS_TODAY_DATE, null)
@@ -76,7 +83,7 @@ object SchedulerPrefs {
 
         pref.edit()
             .putLong(KEY_LAST_ACTION_TIME, System.currentTimeMillis())
-            .putString(KEY_LAST_ACTION_MESSAGE, "Scheduled cycle ran")
+            .putString(KEY_LAST_ACTION_MESSAGE, message)
             .putString(KEY_ACTIONS_TODAY_DATE, today)
             .putInt(KEY_ACTIONS_TODAY_COUNT, count)
             .apply()
